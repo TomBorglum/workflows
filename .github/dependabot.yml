@@ -23,6 +23,15 @@ updates:
   # The cooldown follows from the same reasoning: a bump here can republish to other
   # people's workflows, so leave upstream time to withdraw a bad or compromised
   # release before it ships onward.
+  #
+  # One window, not three. The semver-major/minor/patch-days keys parse fine but have
+  # no effect for github-actions: its update checker resolves a single
+  # `latest_version_tag_respecting_cooldown` and never branches on bump type, so only
+  # default-days is honoured. Setting the per-bump-type keys here would read as policy
+  # while doing nothing - worse than not having them.
+  #
+  # Seven days: long enough that a withdrawn or compromised release has surfaced,
+  # short enough not to sit on a routine fix for a month.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -36,6 +45,4 @@ updates:
         patterns:
           - "*"
     cooldown:
-      semver-major-days: 30
-      semver-minor-days: 7
-      semver-patch-days: 3
+      default-days: 7
