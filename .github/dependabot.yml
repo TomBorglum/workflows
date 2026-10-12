@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # One entry, prefixed "deps", covering every workflow in the repository.
+  #
+  # This is the inverse of the sibling TomBorglum/actions repo, and the reason is a
+  # hard GitHub constraint: a reusable workflow is only callable from
+  # .github/workflows/ at the repository root, and subdirectories are not addressable
+  # in a `uses:` reference. So the workflows this repo *publishes* and the workflows
+  # that run this repo's *own* CI share one directory, and Dependabot's github-actions
+  # fetcher scans that directory as a unit - it cannot be pointed at individual files.
+  #
+  # That forces a choice, because the prefix decides releasability: "deps" is a
+  # visible changelog section and cuts a patch release, "ci" is hidden and cuts
+  # nothing. Getting it wrong in one direction publishes changed code to consumers on
+  # @v1 with no release and no changelog entry. Getting it wrong in the other cuts a
+  # patch release that no consumer is affected by.
+  #
+  # We take the second. Over-releasing is visible and harmless; shipping unreleased
+  # code is silent. A bump to _sonarcloud.yml or _release-please.yml will therefore
+  # cut a release it did not need - see CONTRIBUTING.md, "The deps-for-everything
+  # rule", for what to do about the changelog noise.
+  #
+  # The cooldown follows from the same reasoning: a bump here can republish to other
+  # people's workflows, so leave upstream time to withdraw a bad or compromised
+  # release before it ships onward.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      # Dependabot appends the colon and space itself, so this yields "deps: ..." -
+      # a subject release-please parses into the Dependencies section.
+      prefix: "deps"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    cooldown:
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
