@@ -20,11 +20,14 @@ name: Test Pixi Upgrade
 # `tests-pass` should be the required status check in the main-protection ruleset.
 # Without that, the assertions below gate nothing.
 
+# Deliberately NOT path-filtered, and that is load-bearing now that `tests-pass` is a
+# required status check. A path-filtered workflow cannot gate a merge: when the filter
+# excludes a pull request its checks stay Pending rather than passing, so a required check
+# over a filtered workflow blocks that pull request forever - including an unrelated
+# Dependabot bump. Same rule, same reason, as the sibling actions repo's test workflows.
 on:
   pull_request:
-    paths:
-      - .github/workflows/pixi-upgrade.yml
-      - .github/workflows/_test-pixi-upgrade.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
