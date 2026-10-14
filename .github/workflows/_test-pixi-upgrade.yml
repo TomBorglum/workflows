@@ -1,0 +1,136 @@
+name: Test Pixi Upgrade
+
+# This repository's own CI, not a reusable workflow - hence the leading underscore.
+#
+# Covers pixi-upgrade.yml. Read the job results together, not individually: the first job
+# is SUPPOSED to be red, and `tests-pass` is the only check whose green means anything.
+# That inversion is forced, not chosen. GitHub permits only a fixed set of keywords on a
+# job that calls a reusable workflow - name, uses, with, secrets, strategy, needs, if,
+# concurrency, permissions, cache-mode - and continue-on-error is not among them, so a
+# called workflow's failure cannot be swallowed at the call site.
+#
+# Two ways around it were considered and rejected. Factoring the pixi.toml guard into a
+# script this repository could run directly is impossible: a reusable workflow's
+# actions/checkout checks out the *caller's* repository, so a script living here is never
+# on disk when the workflow runs elsewhere. Giving pixi-upgrade.yml a workflow_dispatch
+# trigger and asserting on the dispatched run fails on the very pull request that
+# introduces it, because GitHub only exposes workflow_dispatch for workflows already
+# present on the default branch.
+#
+# `tests-pass` should be the required status check in the main-protection ruleset.
+# Without that, the assertions below gate nothing.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/pixi-upgrade.yml
+      - .github/workflows/_test-pixi-upgrade.yml
+
+permissions:
+  contents: read
+
+jobs:
+  # EXPECTED TO FAIL. This repository has no root pixi.toml, which is exactly the
+  # condition pixi-upgrade.yml must refuse to run under. Its check-manifest job fails
+  # before anything consumes the secrets below, so this costs no App token.
+  expected-fail-no-manifest:
+    name: Expected failure - no root pixi.toml
+    uses: ./.github/workflows/pixi-upgrade.yml
+    secrets:
+      AUTOMATION_APP_CLIENT_ID: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+  # Guards the two assumptions pixi-upgrade.yml makes about the pixi CLI, neither of which
+  # is settled by pixi's own documentation: that `upgrade` accepts --pinning-strategy (it
+  # is documented as a shared config option, not in the upgrade command's own option
+  # list), and that pixi-diff-to-markdown renders `upgrade --json` output (the documented
+  # recipe only ever pipes `update --json`). A pixi release that broke either would
+  # otherwise surface as a failed scheduled run in someone else's repository.
+  #
+  # Runs in RUNNER_TEMP against a throwaway workspace, so it never touches this
+  # repository and needs no credentials.
+  pipeline-smoke:
+    name: Upgrade pipeline smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: prefix-dev/setup-pixi@a2789fe3805b9ae22d6c25a15df2f2c624cd092e # v0.11.1
+        with:
+          run-install: false
+
+      - name: Upgrade a scratch workspace and render the diff
+        run: |
+          set -euo pipefail
+          ws="${RUNNER_TEMP}/scratch"
+          mkdir -p "$ws"
+
+          # Two deliberately stale pins, so there is always something to upgrade.
+          printf '%s\n' \
+            '[workspace]' \
+            'name = "scratch"' \
+            'channels = ["conda-forge"]' \
+            'platforms = ["linux-64"]' \
+            '' \
+            '[dependencies]' \
+            'rich = "==13.0.0"' \
+            'click = "==8.1.0"' \
+            > "$ws/pixi.toml"
+
+          cd "$ws"
+          pixi upgrade --pinning-strategy exact-version --json > up.json
+          pixi exec pixi-diff-to-markdown < up.json > diff.md
+
+          echo "--- manifest after upgrade ---"
+          cat pixi.toml
+
+          # Each pin must have moved off its stale version, and must still be exact.
+          check_pin () {
+            local pkg="$1" stale="$2" line
+            line="$(grep -E "^${pkg} = " pixi.toml)"
+            if printf '%s' "$line" | grep -qF "\"==${stale}\""; then
+              echo "::error::${pkg} was not upgraded: ${line}"
+              exit 1
+            fi
+            if ! printf '%s' "$line" | grep -qE '= "==[0-9]'; then
+              echo "::error::${pkg} is not pinned exactly after upgrade: ${line}"
+              exit 1
+            fi
+          }
+          check_pin rich 13.0.0
+          check_pin click 8.1.0
+
+          # The renderer must have produced an actual table, not an empty file.
+          if ! grep -q '|Dependency' diff.md; then
+            echo "::error::pixi-diff-to-markdown produced no dependency table from upgrade --json"
+            cat diff.md
+            exit 1
+          fi
+          echo "Upgrade pipeline OK."
+
+  # The check that must be green, and the one to require in the ruleset.
+  tests-pass:
+    name: Tests pass
+    needs: [expected-fail-no-manifest, pipeline-smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert the guard fired and the pipeline works
+        env:
+          GUARD: ${{ needs.expected-fail-no-manifest.result }}
+          SMOKE: ${{ needs.pipeline-smoke.result }}
+        run: |
+          set -euo pipefail
+          echo "expected-fail-no-manifest=${GUARD}  pipeline-smoke=${SMOKE}"
+
+          # Inverted on purpose: pixi-upgrade.yml must refuse to run without a root
+          # pixi.toml, so this job succeeding would mean the guard had regressed.
+          if [[ "$GUARD" != "failure" ]]; then
+            echo "::error::pixi-upgrade.yml was expected to fail without a root pixi.toml, but the call result was '${GUARD}'."
+            exit 1
+          fi
+
+          if [[ "$SMOKE" != "success" ]]; then
+            echo "::error::The upgrade pipeline smoke test did not pass (result '${SMOKE}')."
+            exit 1
+          fi
+
+          echo "All assertions held."

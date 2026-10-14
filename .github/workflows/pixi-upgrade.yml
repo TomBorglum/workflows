@@ -1,0 +1,229 @@
+name: Pixi Upgrade
+
+# Keeps a caller's pixi.toml dependencies current, the way Dependabot keeps
+# github-actions pins current. Dependabot has no pixi ecosystem, so without this a pixi
+# workspace gets no dependency PRs at all.
+#
+# `pixi upgrade`, not `pixi update`: these are different commands. `update` only
+# re-solves pixi.lock within the constraints the manifest already states, so it can
+# never raise a pin. `upgrade` goes looking for newer versions and rewrites the
+# manifest. Only the latter is a dependency bump.
+#
+# --pinning-strategy exact-version writes every pin it touches as `==x.y.z` rather than
+# pixi's default `semver` range, which is what keeps the manifest exactly pinned. Note
+# what it does not do: the strategy governs pins pixi *writes*, so a dependency already
+# sitting at its newest version keeps whatever constraint it had. A manifest that starts
+# out loosely pinned is not tightened by this workflow - it is assumed to be exact
+# already, which is the convention these repositories follow.
+#
+# Authenticates as the caller's GitHub App rather than with GITHUB_TOKEN, because events
+# created by GITHUB_TOKEN do not trigger further workflow runs: the PR would never run
+# the caller's required status checks, so branch protection could never be satisfied and
+# the PR could never merge. Pixi's own documented CI recipe uses GITHUB_TOKEN, but it
+# assumes a repository with no required checks.
+#
+# The caller owns the schedule - a reusable workflow cannot carry its own `schedule:`.
+# See README.md for the caller snippet and the App permissions it needs.
+
+on:
+  workflow_call:
+    secrets:
+      AUTOMATION_APP_CLIENT_ID:
+        description: >-
+          Client ID of a GitHub App installed on the calling repository, with Contents,
+          Pull requests and Issues set to read/write. This is the App's Client ID (App
+          settings -> General -> Client ID), not the numeric App ID.
+        required: true
+      AUTOMATION_APP_PRIVATE_KEY:
+        description: Private key for the same GitHub App.
+        required: true
+
+# Every write goes through the App installation token, never GITHUB_TOKEN, so read is
+# sufficient. create-pull-request's README asks for contents: write and
+# pull-requests: write - that is stated for the GITHUB_TOKEN path, and the App token
+# carries its own permissions instead. A reusable workflow can only downgrade what the
+# caller granted, so declaring it narrowly here documents the contract.
+permissions:
+  contents: read
+
+# Stops a manual run racing a scheduled one onto the same branch. The group is a literal
+# rather than ${{ github.workflow }}: a called workflow inherits its *caller's* name in
+# that context, so sharing the value would make this cancel the caller.
+# cancel-in-progress is false because a half-written upgrade is worse than a queued one.
+concurrency:
+  group: pixi-upgrade-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  # Its own job, ahead of everything else, for three reasons: the required failure is a
+  # distinct red job rather than a step buried in a long log; no App token is minted for
+  # a repository that was never eligible; and the caller test in _test-pixi-upgrade.yml
+  # can assert the failure without needing working App credentials.
+  check-manifest:
+    name: Check for a root pixi.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # This check is load-bearing, not defensive. pixi also accepts a manifest embedded
+      # in pyproject.toml under [tool.pixi.workspace], and resolves it automatically when
+      # no pixi.toml exists - so without this guard the workflow would silently upgrade a
+      # manifest the caller never pointed it at.
+      - name: Require pixi.toml in the repository root
+        run: |
+          set -euo pipefail
+          if [[ ! -f pixi.toml ]]; then
+            echo "::error::No pixi.toml in the root of ${GITHUB_REPOSITORY}. This workflow only upgrades a root pixi.toml; a pyproject.toml carrying [tool.pixi.workspace] is deliberately not accepted."
+            exit 1
+          fi
+          echo "Found pixi.toml in the repository root."
+
+  upgrade:
+    name: Upgrade dependencies
+    needs: check-manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          # client-id, not the deprecated app-id. These are different values:
+          # AUTOMATION_APP_CLIENT_ID holds the App's Client ID, not the numeric App ID.
+          client-id: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Persist the App token so the branch push below is authenticated as the App
+          # rather than as the restricted default GITHUB_TOKEN.
+          token: ${{ steps.app-token.outputs.token }}
+
+      # run-install: false because this job only resolves, never installs - the
+      # environment is never used. No pixi-version is set, so the newest pixi is used:
+      # keeping the pixi binary itself current is a separate concern and out of scope.
+      - uses: prefix-dev/setup-pixi@a2789fe3805b9ae22d6c25a15df2f2c624cd092e # v0.11.1
+        with:
+          run-install: false
+
+      # --json changes the output format only; --dry-run is what suppresses writes, so
+      # this both applies the upgrade (manifest *and* pixi.lock) and reports it. The
+      # report is the lock-level diff, which is what pixi-diff-to-markdown renders -
+      # pixi exec fetches that renderer into a throwaway environment, installing nothing.
+      # Artefacts go to RUNNER_TEMP so they cannot be mistaken for repository content.
+      - name: Upgrade dependencies
+        run: |
+          set -euo pipefail
+          pixi upgrade --pinning-strategy exact-version --json > "${RUNNER_TEMP}/upgrade.json"
+          pixi exec pixi-diff-to-markdown < "${RUNNER_TEMP}/upgrade.json" > "${RUNNER_TEMP}/diff.md"
+
+      # Gate for the title step below, not for the pull request: create-pull-request
+      # already exits silently when there is no diff.
+      #
+      # git status, not git diff: a repository that tracks no pixi.lock gets one created
+      # by the upgrade above, and an untracked file is invisible to `git diff`. That
+      # would report "nothing to do" while holding a freshly solved lock file.
+      - name: Check whether anything moved
+        id: changed
+        run: |
+          set -euo pipefail
+          if [[ -z "$(git status --porcelain -- pixi.toml pixi.lock)" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No upgrades available; nothing to do."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git status --short -- pixi.toml pixi.lock
+          fi
+
+      # Mirrors Dependabot's two title forms. Built from the pixi.toml diff rather than
+      # from upgrade.json, deliberately: that JSON is the *lock-level* diff and includes
+      # transitive packages, so counting it would claim far more updates than the PR
+      # actually makes to the manifest. The diff is also uniform across conda and pypi
+      # dependencies, whereas the JSON carries a version field only for pypi ones.
+      - name: Build the pull request title
+        id: title
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+
+          # "name<TAB>old<TAB>new" per changed pin. The version is read as the first
+          # `==<ver>` on the line, which matches both `pkg = "==1.2.3"` and the inline
+          # table form `pkg = { version = "==1.2.3", channel = "..." }`.
+          # grep exits 1 when the manifest itself did not change (a lock-only re-solve);
+          # under pipefail that would abort the step, so the pipeline may fail and the
+          # empty result is handled explicitly below.
+          changed="$(
+            git diff -U0 -- pixi.toml \
+              | grep -E '^[-+][A-Za-z0-9._-]+[[:space:]]*=' \
+              | sed -E 's/^([-+])([A-Za-z0-9._-]+)[[:space:]]*=.*?"?==?([0-9][^",[:space:]]*).*/\1\2\t\3/' \
+              | awk -F'\t' '
+                  /^-/  { n=substr($1,2); old[n]=$2; order[++c]=n }
+                  /^\+/ { n=substr($1,2); new[n]=$2 }
+                  END { for (i=1;i<=c;i++) { n=order[i]; if (n in new && old[n]!=new[n]) printf "%s\t%s\t%s\n", n, old[n], new[n] } }
+                '
+          )" || true
+
+          count="$(printf '%s' "$changed" | grep -c . || true)"
+
+          if [[ "$count" -eq 1 ]]; then
+            IFS=$'\t' read -r name old new <<<"$changed"
+            title="deps: bump ${name} from ${old} to ${new}"
+          elif [[ "$count" -gt 1 ]]; then
+            title="deps: bump the pixi group with ${count} updates"
+          else
+            # pixi.lock moved but no manifest pin did.
+            title="deps: update the pixi lock file"
+          fi
+
+          echo "Title: ${title}"
+          echo "title=${title}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the bot's commit identity
+        id: bot
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          # create-github-app-token exposes the slug but not the numeric user id, which
+          # the noreply address needs.
+          id="$(gh api "/users/${SLUG}[bot]" --jq .id)"
+          echo "name=${SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${id}+${SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble the pull request body
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          {
+            echo "Automated \`pixi upgrade --pinning-strategy exact-version\`, which rewrites"
+            echo "every pin it moves as an exact \`==x.y.z\` and re-solves \`pixi.lock\` to match."
+            echo
+            echo "The table below is the **lock-level** diff, so it includes transitive packages;"
+            echo "bold entries are the dependencies declared in \`pixi.toml\`."
+            echo
+          } > "${RUNNER_TEMP}/body.md"
+          cat "${RUNNER_TEMP}/diff.md" >> "${RUNNER_TEMP}/body.md"
+
+      # A fixed branch is what makes a later run refresh the open PR instead of stacking a
+      # second one. Three further behaviours come from the action and are deliberately not
+      # reimplemented here: no diff means no PR, an existing PR is updated rather than
+      # duplicated, and a PR made unnecessary by the base branch is closed (and with
+      # delete-branch, its branch removed) - which is Dependabot's supersede behaviour.
+      - name: Create pull request
+        if: steps.changed.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          committer: ${{ steps.bot.outputs.name }} <${{ steps.bot.outputs.email }}>
+          author: ${{ steps.bot.outputs.name }} <${{ steps.bot.outputs.email }}>
+          branch: deps/update-pixi
+          delete-branch: true
+          base: ${{ github.event.repository.default_branch }}
+          commit-message: ${{ steps.title.outputs.title }}
+          title: ${{ steps.title.outputs.title }}
+          body-path: ${{ runner.temp }}/body.md
+          labels: dependencies
+          # Only the two files pixi rewrites; anything else in the workspace is ignored.
+          add-paths: |
+            pixi.toml
+            pixi.lock

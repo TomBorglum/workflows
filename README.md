@@ -21,10 +21,60 @@ jobs:
 
 | Workflow | Purpose |
 | --- | --- |
-| _none yet_ | The first workflow lands as a `feat:` PR — see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-reusable-workflow). |
+| [`pixi-upgrade.yml`](.github/workflows/pixi-upgrade.yml) | Upgrade every dependency in a root `pixi.toml` to its newest version, re-pin each exactly, re-solve `pixi.lock`, and open a pull request. Dependabot for pixi. |
 
-Files prefixed with an underscore (`_release-please.yml`, `_sonarcloud.yml`) are this
-repository's own CI. They are not callable and never appear in the table above.
+Files prefixed with an underscore (`_release-please.yml`, `_sonarcloud.yml`,
+`_test-pixi-upgrade.yml`) are this repository's own CI. They are not callable and never
+appear in the table above.
+
+### `pixi-upgrade.yml`
+
+Dependabot has no pixi ecosystem, so a pixi workspace gets no dependency PRs on its own.
+This runs `pixi upgrade --pinning-strategy exact-version`, which finds newer versions,
+rewrites each pin it moves as an exact `==x.y.z`, and re-solves `pixi.lock`. If anything
+moved, it opens one pull request on `deps/update-pixi`, titled the way Dependabot titles
+its own (`deps: bump <name> from X to Y`, or `deps: bump the pixi group with N updates`)
+and labelled `dependencies`. A later run updates that pull request in place rather than
+opening a second one.
+
+There are no inputs. The schedule lives with the caller, because a reusable workflow
+cannot carry its own `schedule:`:
+
+```yaml
+name: Update pixi dependencies
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pixi-upgrade:
+    uses: TomBorglum/workflows/.github/workflows/pixi-upgrade.yml@v1
+    secrets:
+      AUTOMATION_APP_CLIENT_ID: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
+      AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+```
+
+**It fails if there is no `pixi.toml` in the repository root.** That is deliberate, and
+it is not the same as "no pixi workspace": pixi also reads a manifest embedded in
+`pyproject.toml` under `[tool.pixi.workspace]`, and would silently upgrade that instead.
+Only a root `pixi.toml` is accepted.
+
+**Both secrets are required**, and they must belong to a GitHub App installed on the
+calling repository with **Contents**, **Pull requests** and **Issues** set to read/write.
+Issues is the easily-missed one — the `dependencies` label is applied through the issues
+API. A GitHub App rather than `GITHUB_TOKEN` because events created by `GITHUB_TOKEN` do
+not trigger further workflow runs, so the pull request would never run your required
+status checks and could never merge.
+
+**All dependencies are assumed to be exactly pinned already.** `--pinning-strategy`
+governs the pins pixi *writes*, so a dependency already sitting at its newest version
+keeps whatever constraint it has. This workflow does not tighten a manifest that starts
+out loosely pinned.
 
 ## Versioning and pinning
 
