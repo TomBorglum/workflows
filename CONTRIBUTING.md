@@ -267,8 +267,12 @@ land all of:
   **No `paths:` filter**, however tempting. When a filter excludes a pull request the
   workflow's checks stay *Pending* rather than passing, so a required check over a
   filtered workflow can never be satisfied and the pull request deadlocks permanently.
-  Aggregate the jobs into one `<name>-tests-pass` job with `if: always()` and make that
-  the required check instead.
+  Instead, end the file with an aggregate job carrying `if: always()` and
+  **`name: Tests pass`** — spelled exactly that, because `Tests pass` is the status check
+  the `main-protection` ruleset requires. A job named anything else never reports that
+  context, so the required check sits unreported and the pull request is blocked just as
+  permanently. The job id itself can be whatever reads well; `name:` is what becomes the
+  check.
 
   **Design the workflow so that calling it can finish green**, because nothing else
   can. A job calling a reusable workflow may use only `name`, `uses`, `with`,

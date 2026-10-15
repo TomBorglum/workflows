@@ -88,10 +88,16 @@ jobs:
           test -z "$PR_NUMBER"
           test -z "$PR_URL"
 
-  # One required check covering the whole file, mirroring the sibling repo's
-  # *-tests-pass convention. if: always() so a failed job above is reported here as a
-  # failure rather than leaving this Pending forever.
-  update-pixi-dependencies-tests-pass:
+  # One required check covering the whole file. Its NAME is load-bearing: the
+  # main-protection ruleset requires a status check named exactly "Tests pass", so a job
+  # named anything else never reports that context and the pull request stays blocked -
+  # the same deadlock a paths: filter causes, by another route. The job id can be
+  # whatever reads well; `name:` is what becomes the check.
+  #
+  # if: always() so a failed job above is reported here as a failure rather than leaving
+  # the required check Pending forever.
+  tests-pass:
+    name: Tests pass
     if: always()
     needs: [call, assert]
     runs-on: ubuntu-latest
