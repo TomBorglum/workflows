@@ -1,0 +1,31 @@
+# A workspace deliberately pinned to a stale version, for
+# _test-update-pixi-dependencies.yml. The test upgrades it in dry-run mode and asserts
+# what the workflow reported back to its caller.
+#
+# DO NOT REFRESH THE PIN BELOW. A fixture pinned to the latest version would make the
+# whole test pass by having nothing to upgrade - the assertion that `changed` is true
+# would then be asserting nothing.
+#
+# No pixi.lock is committed on purpose: the upgrade creates one, which exercises the
+# path a workspace without a lockfile takes.
+[workspace]
+name = "fixture-pixi-outdated"
+channels = ["conda-forge"]
+# One platform only: the solve is the slow part of the test, and nothing in the
+# workflow's contract is per-platform.
+platforms = ["linux-64"]
+
+[dependencies]
+# The package the assertions key on: released often, so a newer version is guaranteed to
+# exist to upgrade to, and dependency-free, so it costs the solve almost nothing.
+tzdata = "==2024a"
+
+# Not arbitrary, and not removable. setup-direnv's use_pixi resolves the environment
+# prefix with `pixi run` and then requires $CONDA_PREFIX/bin to be a directory - so the
+# workspace has to install at least one package that produces binaries. tzdata is pure
+# data and produces none, which fails activation with "failed to resolve pixi environment
+# prefix" before the upgrade is ever reached. python is what setup-direnv's own
+# fixture-pixi uses for the same reason, so it is the proven choice here.
+#
+# It is upgraded along with tzdata, which is harmless: the assertions name tzdata.
+python = "3.12.*"
