@@ -174,23 +174,15 @@ jobs:
 
       # Provides pixi. The version is the caller's, declared in their .envrc as
       # `use pixi <version>`; this workflow neither pins one nor accepts one.
-      #
-      # Both TomBorglum/actions pins below are main rather than a release tag, because
-      # update-pixi-dependencies is not in one yet: v2.0.0 predates it, and the release
-      # that will carry it is TomBorglum/actions#9. Pinning v2.0.0 fails at "Set up job"
-      # with "Can't find 'action.yml' ... for action
-      # TomBorglum/actions/update-pixi-dependencies@cd6deba". Re-pin both to the v2.1.0
-      # release commit, in one deps: commit, once that PR has merged. setup-direnv is
-      # byte-identical at both commits bar four lines of its README.
       - name: Install pixi from the workspace's .envrc
-        uses: TomBorglum/actions/setup-direnv@bfcea939f4d228cabc47ae16509ea865d2ddf03f # main, pending v2.1.0
+        uses: TomBorglum/actions/setup-direnv@1ea10924e93693abdbda1f9888dd3c074250f7f6 # v2.1.0
         with:
           working-directory: ${{ inputs.working-directory }}
           stub-directives: ${{ inputs.stub-directives }}
 
       - name: Upgrade pixi dependencies
         id: upgrade
-        uses: TomBorglum/actions/update-pixi-dependencies@bfcea939f4d228cabc47ae16509ea865d2ddf03f # main, pending v2.1.0
+        uses: TomBorglum/actions/update-pixi-dependencies@1ea10924e93693abdbda1f9888dd3c074250f7f6 # v2.1.0
         with:
           working-directory: ${{ inputs.working-directory }}
           pinning-strategy: ${{ inputs.pinning-strategy }}
