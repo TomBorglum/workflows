@@ -1,0 +1,107 @@
+name: update-pixi-dependencies test
+
+# This repository's own CI, not a reusable workflow - hence the leading underscore.
+#
+# Exercises update-pixi-dependencies.yml by calling it the way a consumer would, by local
+# path so the branch's version runs rather than a released tag. It upgrades
+# test/fixture-pixi-outdated - a workspace with an .envrc and a deliberately stale pin -
+# and then asserts what CONTRIBUTING says a caller test is for: that the declared outputs
+# really surface to the caller, and that an omitted optional input falls back to its
+# default.
+#
+# dry-run: true, which is what makes this test possible at all:
+#
+#   - It opens no pull request, so a test run leaves nothing behind to clean up. A test
+#     that created a real pull request on every push would be churn at best and an
+#     unstable end state at worst.
+#   - It needs no secrets, so this is green on a fork pull request too. That matters
+#     because the aggregate job below is a required check, and a required check that
+#     cannot run blocks the merge permanently.
+#
+# It also deliberately passes NO secrets: block, which is itself the assertion that the
+# two App secrets really are optional on the dry-run path.
+#
+# What it therefore does NOT cover is create-pull-request itself. There is no way to: a
+# job calling a reusable workflow may use only name/uses/with/secrets/strategy/needs/if/
+# concurrency/permissions/cache-mode - continue-on-error is not among them - so a called
+# workflow that fails takes this run down with it, and a called workflow that succeeds has
+# opened a real pull request. The PR half is verified by a workflow_dispatch against a
+# real repository after release.
+#
+# Deliberately NOT path-filtered. When a filter excludes a pull request the checks stay
+# Pending rather than passing, so a required check over a filtered workflow deadlocks the
+# pull request permanently.
+#
+# The upgrade reaches conda-forge, which is inherent: an upgrade is a solve against a real
+# channel, and there is nothing to assert without one.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  call:
+    uses: ./.github/workflows/update-pixi-dependencies.yml
+    with:
+      working-directory: test/fixture-pixi-outdated
+      dry-run: true
+      # pinning-strategy, branch, base and stub-directives are all omitted on purpose:
+      # the assertions below are what proves their defaults applied.
+
+  assert:
+    needs: call
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert the outputs reached the caller
+        env:
+          CHANGED: ${{ needs.call.outputs.changed }}
+          SUMMARY: ${{ needs.call.outputs.summary }}
+          PR_NUMBER: ${{ needs.call.outputs.pull-request-number }}
+          PR_URL: ${{ needs.call.outputs.pull-request-url }}
+        run: |
+          set -euo pipefail
+          printf 'changed=%s\n' "$CHANGED"
+          printf '%s\n' "$SUMMARY"
+
+          # The gate a consumer hangs their own steps off, and the assertion that the
+          # upgrade actually happened inside the called workflow: a dry run that silently
+          # did nothing would leave this false.
+          test "$CHANGED" = 'true'
+
+          # The summary crossed the workflow boundary intact - multi-line and all - and
+          # names the package the fixture pinned stale. The version is hardcoded here for
+          # the same reason the fixture says not to refresh it.
+          grep -q 'tzdata' <<<"$SUMMARY"
+          grep -q '==2024a' <<<"$SUMMARY"
+
+          # ... and the new constraint came back EXACT, which is the only assertion that
+          # the omitted pinning-strategy input fell back to its exact-version default. A
+          # workflow that dropped the input entirely would still report a changed version,
+          # just with a semver constraint, and every other check here would pass.
+          grep -qE '\| `==[0-9][^`]*` \|$' <<<"$SUMMARY"
+
+          # No pull request on a dry run, and these are the outputs a consumer would
+          # branch on to find that out.
+          test -z "$PR_NUMBER"
+          test -z "$PR_URL"
+
+  # One required check covering the whole file, mirroring the sibling repo's
+  # *-tests-pass convention. if: always() so a failed job above is reported here as a
+  # failure rather than leaving this Pending forever.
+  update-pixi-dependencies-tests-pass:
+    if: always()
+    needs: [call, assert]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert every job passed
+        env:
+          CALL: ${{ needs.call.result }}
+          ASSERT: ${{ needs.assert.result }}
+        run: |
+          set -euo pipefail
+          echo "call=$CALL assert=$ASSERT"
+          test "$CALL" = 'success'
+          test "$ASSERT" = 'success'

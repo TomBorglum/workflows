@@ -1,0 +1,22 @@
+# A workspace deliberately pinned to a stale version, for
+# _test-update-pixi-dependencies.yml. The test upgrades it in dry-run mode and asserts
+# what the workflow reported back to its caller.
+#
+# DO NOT REFRESH THE PIN BELOW. A fixture pinned to the latest version would make the
+# whole test pass by having nothing to upgrade - the assertion that `changed` is true
+# would then be asserting nothing.
+#
+# No pixi.lock is committed on purpose: the upgrade creates one, which exercises the
+# path a workspace without a lockfile takes.
+[workspace]
+name = "fixture-pixi-outdated"
+channels = ["conda-forge"]
+# One platform only: the solve is the slow part of the test, and nothing in the
+# workflow's contract is per-platform.
+platforms = ["linux-64"]
+
+# Dependency-free and released often. Dependency-free keeps both the `pixi install` that
+# setup-direnv performs and the upgrade's solve cheap; released often is what guarantees
+# a newer version exists to upgrade to.
+[dependencies]
+tzdata = "==2024a"
