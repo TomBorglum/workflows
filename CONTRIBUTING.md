@@ -249,9 +249,9 @@ land all of:
   A reusable workflow cannot grant itself more than the caller's token already has, so
   declaring it narrowly here documents the contract and fails loudly when a caller has
   not granted enough.
-- A caller test, `.github/workflows/_test-<name>.yml`, triggered on `pull_request`
-  with a `paths:` filter for the workflow file. Call the workflow by its local path so
-  the test exercises the branch's version, not a released tag:
+- A caller test, `.github/workflows/_test-<name>.yml`, triggered on `pull_request`.
+  Call the workflow by its local path so the test exercises the branch's version, not a
+  released tag:
 
   ```yaml
   jobs:
@@ -263,6 +263,23 @@ land all of:
 
   Test what would actually break a consumer — that declared `outputs` really surface
   to the caller, and that an omitted optional input falls back to its default.
+
+  **No `paths:` filter**, however tempting. When a filter excludes a pull request the
+  workflow's checks stay *Pending* rather than passing, so a required check over a
+  filtered workflow can never be satisfied and the pull request deadlocks permanently.
+  Aggregate the jobs into one `<name>-tests-pass` job with `if: always()` and make that
+  the required check instead.
+
+  **Design the workflow so that calling it can finish green**, because nothing else
+  can. A job calling a reusable workflow may use only `name`, `uses`, `with`,
+  `secrets`, `strategy`, `needs`, `if`, `concurrency`, `permissions` and `cache-mode` —
+  `continue-on-error` is *not* among them, so a called workflow that fails takes the
+  test run down with it. A refusal therefore cannot be asserted the way a composite
+  action's can, where step-level `continue-on-error` works fine. A workflow with an
+  outward-facing side effect needs a way to be called without it — a `dry-run` input,
+  as [`update-pixi-dependencies.yml`](.github/workflows/update-pixi-dependencies.yml)
+  has — which is also what lets the test run with no `secrets:` block and so stay green
+  on a fork pull request, where secrets are never available.
 - A row in the workflow index in [`README.md`](README.md), documenting the inputs and
   any secret the caller has to pass.
 
