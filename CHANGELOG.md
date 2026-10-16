@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/TomBorglum/workflows/compare/v1.0.0...v1.0.1) (2026-10-16)
+
+
+### Dependencies
+
+* bump TomBorglum/actions to v3.0.0 and follow the renamed action paths ([#5](https://github.com/TomBorglum/workflows/issues/5)) ([8415dd7](https://github.com/TomBorglum/workflows/commit/8415dd743668c7ed8ecb770e6ef477a20aa6a5a7))
+
 ## 1.0.0 (2026-10-15)
 
 
