@@ -35,7 +35,7 @@ other ecosystems you have covered. Called on a schedule, this is the updater tha
 it.
 
 It wraps
-[`TomBorglum/actions/update-pixi-dependencies`](https://github.com/TomBorglum/actions/tree/main/update-pixi-dependencies),
+[`TomBorglum/actions/pixi/upgrade-dependencies`](https://github.com/TomBorglum/actions/tree/main/pixi/upgrade-dependencies),
 which performs the upgrade and reports what moved but deliberately opens no pull request.
 
 ```yaml
@@ -66,7 +66,7 @@ use pixi 0.81.0
 ```
 
 This workflow installs no pixi of its own. It evaluates that `.envrc` with
-[`setup-direnv`](https://github.com/TomBorglum/actions/tree/main/setup-direnv), whose
+[`direnv/setup`](https://github.com/TomBorglum/actions/tree/main/direnv/setup), whose
 `use pixi <version>` directive installs that exact pixi and puts it on `PATH`. The
 resolver that judges your upgrade is therefore the one you already pin for your
 workstations and your CI, and there is no pixi version to configure here — or to keep in
