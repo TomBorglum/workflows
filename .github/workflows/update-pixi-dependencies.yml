@@ -2,7 +2,7 @@ name: Update pixi dependencies
 
 # Upgrades a pixi workspace's dependencies and opens a pull request with the result.
 #
-# This is the other half of TomBorglum/actions/update-pixi-dependencies, which performs
+# This is the other half of TomBorglum/actions/pixi/upgrade-dependencies, which performs
 # the upgrade and reports what moved but deliberately opens no pull request. Dependabot
 # has no pixi ecosystem, so a version declared in a pixi.toml is never bumped for you,
 # however many other ecosystems a repository has covered. Call this on a schedule and it
@@ -10,14 +10,14 @@ name: Update pixi dependencies
 #
 # The job is three things: provide pixi, upgrade, open a pull request.
 #
-# pixi comes from the CALLER'S OWN .envrc. setup-direnv evaluates it, and its `use pixi
+# pixi comes from the CALLER'S OWN .envrc. direnv/setup evaluates it, and its `use pixi
 # <version>` directive installs that exact pixi and puts it on PATH; the action installs
 # none itself. So the resolver that judges an upgrade is the one the consuming repository
 # already pins for its workstations and its CI, and there is no pixi version to configure
 # here - or to keep in step with theirs.
 #
 # Every way a caller can get the setup wrong fails the job rather than passing green:
-# a missing .envrc fails in setup-direnv, an .envrc with no `use pixi` line fails in the
+# a missing .envrc fails in direnv/setup, an .envrc with no `use pixi` line fails in the
 # action with a message naming both supported providers, and `use pixi` without a version
 # fails in the directive. A green run that silently upgraded nothing is the one outcome
 # worse than a red one.
@@ -68,8 +68,8 @@ on:
         default: ''
       stub-directives:
         description: >-
-          Whitespace-separated directive names for setup-direnv to define as no-ops.
-          setup-direnv rejects an .envrc that uses a directive it does not define, so an
+          Whitespace-separated directive names for direnv/setup to define as no-ops.
+          direnv/setup rejects an .envrc that uses a directive it does not define, so an
           .envrc declaring anything beyond `use pixi`, `use fnm`, `use sdk` and direnv's
           own built-ins needs its extra directives named here to evaluate on a runner.
         type: string
@@ -175,20 +175,20 @@ jobs:
       # Provides pixi. The version is the caller's, declared in their .envrc as
       # `use pixi <version>`; this workflow neither pins one nor accepts one.
       - name: Install pixi from the workspace's .envrc
-        uses: TomBorglum/actions/setup-direnv@1ea10924e93693abdbda1f9888dd3c074250f7f6 # v2.1.0
+        uses: TomBorglum/actions/direnv/setup@8bb5c662cb67237681564ec96cbb7ed84bc4aed8 # v3.0.0
         with:
           working-directory: ${{ inputs.working-directory }}
           stub-directives: ${{ inputs.stub-directives }}
 
       - name: Upgrade pixi dependencies
         id: upgrade
-        uses: TomBorglum/actions/update-pixi-dependencies@1ea10924e93693abdbda1f9888dd3c074250f7f6 # v2.1.0
+        uses: TomBorglum/actions/pixi/upgrade-dependencies@8bb5c662cb67237681564ec96cbb7ed84bc4aed8 # v3.0.0
         with:
           working-directory: ${{ inputs.working-directory }}
           pinning-strategy: ${{ inputs.pinning-strategy }}
 
       # Name the two files the upgrade is allowed to have touched, so the pull request
-      # cannot carry anything else. This matters more than it looks: setup-direnv's
+      # cannot carry anything else. This matters more than it looks: direnv/setup's
       # use_pixi runs `pixi install`, so .pixi/envs/ is sitting in the checkout by now -
       # a whole materialised environment, which create-pull-request would commit along
       # with everything else if add-paths were left unset. With it set, non-matching
