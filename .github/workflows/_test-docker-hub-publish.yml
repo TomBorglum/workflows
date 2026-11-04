@@ -31,6 +31,14 @@ name: docker-hub-publish test
 # than a repository secret is what keeps this green on a fork pull request, where secrets
 # are never available. Nothing ever assumes it: the only step that reads it is in `push`.
 #
+# `trivyignores` IS DELIBERATELY NOT SET, and this repository deliberately holds no
+# .trivyignore.yaml, so the scan runs with no ignore file at all. That is the assertion
+# that a caller suppressing nothing needs no such file - which it previously did, the path
+# having been hardcoded in the scan step. The complement, that a named ignore file is
+# honoured, is NOT covered: a reusable workflow takes one value per call, so asserting it
+# would mean a second `call` job and a second full image build for a one-line
+# pass-through. Taken knowingly.
+#
 # Deliberately NOT path-filtered. When a filter excludes a pull request the checks stay
 # Pending rather than passing, so a required check over a filtered workflow deadlocks the
 # pull request permanently.
