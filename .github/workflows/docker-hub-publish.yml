@@ -71,8 +71,7 @@ on:
       trivyignores:
         description: >-
           Comma-separated list of relative paths within the repository to one or more
-          .trivyignore files, or a single .trivyignore.yaml file. Empty means no ignore
-          file: a .trivyignore.yaml in the root is not found on its own.
+          .trivyignore files, or a single .trivyignore.yaml file.
         required: false
         default: ''
         type: string

@@ -173,8 +173,6 @@ jobs:
       aws-region: ${{ vars.AWS_REGION }}
       aws-ssm-parameter: /my-project/release/dockerhub-pat
       dockerhub-namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
-      # Only if you suppress a Trivy finding.
-      trivyignores: .trivyignore.yaml
     secrets:
       aws-role-arn: ${{ secrets.AWS_RELEASE_ROLE_ARN }}
 ```
@@ -196,8 +194,6 @@ in outline:
 - An **SSM SecureString** holding a Docker Hub PAT with Read & Write, and an inline policy
   granting `ssm:GetParameter` on that one parameter ARN as a literal.
 - **`id-token: write`** on the calling job, as above.
-- **Nothing for Trivy**, unless you suppress a finding — then name the file in
-  `trivyignores`. A `.trivyignore.yaml` in your root is not found on its own.
 - Per image directory, a **`Dockerfile`** and a **`docker-bake.hcl` declaring
   `target "image"`**.
 - Per compose directory, a **`compose.yaml` declaring `name: <repository>-<directory>`**,
@@ -213,7 +209,7 @@ in outline:
 | `aws-region` | *(required)* | Region the role is assumed in and the PAT parameter is read from. |
 | `aws-ssm-parameter` | *(required)* | Absolute SSM path holding the Docker Hub PAT. Not a secret: a path is an address. |
 | `dockerhub-namespace` | *(required)* | Docker Hub namespace every image publishes under. Must be the account the PAT belongs to, which nothing checks. |
-| `trivyignores` | *(none)* | Comma-separated list of relative paths within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml` file. Empty means no ignore file. |
+| `trivyignores` | *(none)* | Comma-separated list of relative paths within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml` file. |
 
 #### Secrets
 

@@ -31,9 +31,7 @@ name: docker-hub-publish test
 # than a repository secret is what keeps this green on a fork pull request, where secrets
 # are never available. Nothing ever assumes it: the only step that reads it is in `push`.
 #
-# `trivyignores` is left unset against a repository holding no .trivyignore.yaml, which is
-# the assertion that a caller suppressing nothing needs no such file. That a named file IS
-# honoured is not covered: one value per call, so it would cost a second image build.
+# `trivyignores` is left unset, asserting that a caller suppressing nothing needs no file.
 #
 # Deliberately NOT path-filtered. When a filter excludes a pull request the checks stay
 # Pending rather than passing, so a required check over a filtered workflow deadlocks the

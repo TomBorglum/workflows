@@ -115,8 +115,7 @@ cannot walk, Trivy resolves the empty config `{}`, reports no findings and exits
 
 Suppressions go in the **`trivyignores`** input: a comma-separated list of relative paths
 within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml`
-file. Empty means no ignore file; a `.trivyignore.yaml` in the root is not found on its
-own.
+file.
 
 Give every suppression an `expired_at` date. On that date Trivy stops honouring the entry
 and the finding fails the release again, so a suppression cannot outlive its reason by
