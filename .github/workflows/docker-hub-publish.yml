@@ -373,9 +373,14 @@ jobs:
             [ -n "$directory" ] || continue
             # Nested composes a three-component Hub repository, and a project name whose
             # silently stripped slash collides with the flat spelling.
-            case "$directory" in */*)
-              echo "::error::compose directory $directory must not be nested."
-              exit 1 ;;
+            case "$directory" in
+              */*)
+                echo "::error::compose directory $directory must not be nested."
+                exit 1 ;;
+              # A no-op default. SonarCloud's "add a default case" rule is a required
+              # check in this repository, and the `case` already fell through when no
+              # pattern matched, so this spells out what it already did.
+              *) ;;
             esac
             # <repository>-<directory>, the formula the images and the artifact follow, so
             # a deployer reads the project, network and volume off the artifact reference.

@@ -10,3 +10,8 @@ FROM scratch
 # Something to copy, so the build produces a layer and therefore a digest rather than an
 # empty manifest.
 COPY marker.txt /marker.txt
+
+# Nothing ever runs this image - it exists to be built, scanned and have a digest read off
+# it. Declared anyway because a scratch image otherwise defaults to root, which SonarCloud
+# flags, and a fixture other people read from should not model the thing being flagged.
+USER 65532:65532

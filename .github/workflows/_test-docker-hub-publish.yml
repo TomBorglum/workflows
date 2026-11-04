@@ -18,9 +18,13 @@ name: docker-hub-publish test
 #
 # `push` is the job with the credential, and it carries `if: github.event_name == 'release'`
 # of its own. On a pull_request it skips, which is this workflow's equivalent of the
-# `dry-run` input CONTRIBUTING asks for: nothing is published and no AWS call is made. The
-# `call` job below deliberately does NOT grant `id-token: write`, which is itself the
-# assertion that the build-and-validate half needs no OIDC token.
+# `dry-run` input CONTRIBUTING asks for: nothing is published and no AWS call is made.
+#
+# `id-token: write` IS GRANTED BELOW, AND HAS TO BE, even though the job that uses it
+# skips. A called workflow may not request more than the caller grants, and GitHub checks
+# that when the run STARTS rather than when the job would run - so withholding it fails
+# the whole run with `startup_failure` and no job logs, not with a skipped job. Measured:
+# this test was written without it first. The grant is a ceiling, not a use.
 #
 # The `secrets:` block passes a syntactically valid but deliberately fake role ARN. It has
 # to be passed at all because `aws-role-arn` is declared required, and a literal rather
@@ -41,8 +45,10 @@ permissions:
 jobs:
   call:
     uses: ./.github/workflows/docker-hub-publish.yml
+    # A ceiling the called workflow can only lower, which `build` and `compose` both do.
     permissions:
       contents: read
+      id-token: write
     with:
       image-directories: '["fixture-image"]'
       compose-directories: '["fixture-compose"]'
