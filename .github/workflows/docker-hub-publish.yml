@@ -71,10 +71,8 @@ on:
       trivyignores:
         description: >-
           Comma-separated list of relative paths within the repository to one or more
-          .trivyignore files, or a single .trivyignore.yaml file. Passed through verbatim.
-          EMPTY BY DEFAULT, and empty means no ignore file rather than a default path, so
-          a repository suppressing nothing needs none - and ONE THAT DOES HAS TO NAME IT
-          HERE, a .trivyignore.yaml in the root not being picked up on its own.
+          .trivyignore files, or a single .trivyignore.yaml file. Empty means no ignore
+          file: a .trivyignore.yaml in the root is not found on its own.
         required: false
         default: ''
         type: string
@@ -290,9 +288,6 @@ jobs:
           input: /tmp/oci
           scanners: vuln
           severity: HIGH,CRITICAL
-          # Empty unless the caller named one, and trivy-action skips its whole
-          # ignorefile block on an empty value. A hardcoded path here made the file
-          # mandatory for every caller.
           trivyignores: ${{ inputs.trivyignores }}
           format: json
           output: /tmp/trivy.json

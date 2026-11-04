@@ -113,15 +113,10 @@ config present in the scanned layout and declaring a platform.** Pointed at a la
 cannot walk, Trivy resolves the empty config `{}`, reports no findings and exits 0, and
 `{}` declares no platform.
 
-Suppressions are opt-in, through the **`trivyignores`** input: a comma-separated list of
-relative paths within the repository to one or more `.trivyignore` files, or a single
-`.trivyignore.yaml` file.
-
-**Empty by default, and empty means no ignore file rather than a default path.** A
-repository that suppresses nothing needs none. One that does has to name it here — a
-`.trivyignore.yaml` in the root is not picked up on its own — and forgetting fails in the
-safe direction: the suppressed findings come back and fail the release, rather than a
-suppression applying unseen.
+Suppressions go in the **`trivyignores`** input: a comma-separated list of relative paths
+within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml`
+file. Empty means no ignore file; a `.trivyignore.yaml` in the root is not found on its
+own.
 
 Give every suppression an `expired_at` date. On that date Trivy stops honouring the entry
 and the finding fails the release again, so a suppression cannot outlive its reason by
