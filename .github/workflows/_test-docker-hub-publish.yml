@@ -1,0 +1,140 @@
+name: docker-hub-publish test
+
+# This repository's own CI, not a reusable workflow - hence the leading underscore.
+#
+# Exercises docker-hub-publish.yml by calling it the way a consumer would, by local path
+# so the branch's version runs rather than a released tag. It builds fixture-image and
+# validates fixture-compose, then asserts what a consumer would actually notice if it
+# broke.
+#
+# BOTH FIXTURES ARE TOP-LEVEL DIRECTORIES, which is forced twice over and is not a tidiness
+# choice. The compose job refuses a nested directory outright, and the build job's artifact
+# is named `image-<directory>`, which upload-artifact rejects if the name contains a slash.
+# Moving either fixture under test/ breaks this test in two different places.
+#
+# The workflow declares NO workflow_call outputs, so there is nothing to assert the way
+# _test-update-pixi-dependencies.yml asserts its own. What crosses the boundary instead are
+# the two artifacts the `push` job would consume, and those are what `assert` reads back.
+#
+# `push` is the job with the credential, and it carries `if: github.event_name == 'release'`
+# of its own. On a pull_request it skips, which is this workflow's equivalent of the
+# `dry-run` input CONTRIBUTING asks for: nothing is published and no AWS call is made. The
+# `call` job below deliberately does NOT grant `id-token: write`, which is itself the
+# assertion that the build-and-validate half needs no OIDC token.
+#
+# The `secrets:` block passes a syntactically valid but deliberately fake role ARN. It has
+# to be passed at all because `aws-role-arn` is declared required, and a literal rather
+# than a repository secret is what keeps this green on a fork pull request, where secrets
+# are never available. Nothing ever assumes it: the only step that reads it is in `push`.
+#
+# Deliberately NOT path-filtered. When a filter excludes a pull request the checks stay
+# Pending rather than passing, so a required check over a filtered workflow deadlocks the
+# pull request permanently.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  call:
+    uses: ./.github/workflows/docker-hub-publish.yml
+    permissions:
+      contents: read
+    with:
+      image-directories: '["fixture-image"]'
+      compose-directories: '["fixture-compose"]'
+      # Well-formed but inert. The step that validates all three lives in `push`, which
+      # skips here, so these only have to satisfy the declarations.
+      aws-region: eu-north-1
+      aws-ssm-parameter: /fixture/release/dockerhub-pat
+      dockerhub-namespace: fixture-namespace
+    secrets:
+      aws-role-arn: arn:aws:iam::000000000000:role/fixture-never-assumed
+
+  assert:
+    needs: call
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-fixture-image
+          path: /tmp/image
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compose-files
+          path: /tmp/compose
+
+      - name: Assert the image archive, its digest and its repository
+        run: |
+          set -euo pipefail
+          ls -la /tmp/image
+
+          # THE NAME FORMULA, which is the one thing a consumer cannot recover if it
+          # changes: <namespace>/<repository>-<directory>. The namespace is the input
+          # above, the repository is this one, and the directory is the matrix leg.
+          repository="$(cat /tmp/image/repository)"
+          echo "repository=$repository"
+          test "$repository" = 'fixture-namespace/workflows-fixture-image'
+
+          # A digest, and the shape of one: the push job resolves the archive against it,
+          # so an empty or malformed value is a release that pushes nothing.
+          digest="$(cat /tmp/image/digest)"
+          echo "digest=$digest"
+          grep -qE '^sha256:[0-9a-f]{64}$' <<<"$digest"
+
+          # The archive is a real OCI layout, not an empty tar: the unpack the scan and
+          # the push both depend on.
+          tar -tf /tmp/image/image.oci.tar | grep -qx 'oci-layout'
+          tar -tf /tmp/image/image.oci.tar | grep -qx 'index.json'
+
+      - name: Assert every compose directory was staged
+        run: |
+          set -euo pipefail
+          find /tmp/compose -type f | sort
+
+          # ALWAYS written, empty input included, which is what lets the push job keep a
+          # plain `needs` gate on an empty compose list.
+          grep -qx 'fixture-compose' /tmp/compose/directories
+
+          # The whole directory travels, the .env included - and that file is hidden, so
+          # this is also the assertion that include-hidden-files is still set on the
+          # upload. Without it a release would publish a compose file whose variables
+          # resolve to placeholders.
+          test -f /tmp/compose/fixture-compose/compose.yaml
+          test -f /tmp/compose/fixture-compose/.env
+
+          # Every interpolated name, placeholdered so the file can be rendered by
+          # something holding no values. The directory's own .env outranks it at publish
+          # time, which is why both files are present.
+          placeholders=/tmp/compose/fixture-compose/.placeholders.env
+          test -f "$placeholders"
+          for name in IMAGE_PREFIX IMAGE_TAG FIXTURE_MESSAGE; do
+            grep -qE "^$name=" "$placeholders" || {
+              echo "::error::$name missing from .placeholders.env"; exit 1; }
+          done
+
+  # One required check covering the whole file. Its NAME is load-bearing: the
+  # main-protection ruleset requires a status check named exactly "Tests pass", so a job
+  # named anything else never reports that context and the pull request stays blocked.
+  #
+  # if: always() so a failed job above is reported here as a failure rather than leaving
+  # the required check Pending forever.
+  tests-pass:
+    name: Tests pass
+    if: always()
+    needs: [call, assert]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert every job passed
+        env:
+          CALL: ${{ needs.call.result }}
+          ASSERT: ${{ needs.assert.result }}
+        run: |
+          set -euo pipefail
+          echo "call=$CALL assert=$ASSERT"
+          test "$CALL" = 'success'
+          test "$ASSERT" = 'success'

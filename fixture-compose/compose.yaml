@@ -1,0 +1,26 @@
+# Compose fixture for _test-docker-hub-publish.yml, and a worked example of the contract
+# docker-hub-publish.yml's `compose-directories` input describes.
+#
+# The project name is `<repository>-<directory>` - this repository is `workflows` and this
+# directory is `fixture-compose` - which the compose job checks and fails a release over.
+#
+# IMAGE_PREFIX and IMAGE_TAG are THE ONLY TWO NAMES the workflow sets. They carry `:-`
+# placeholders rather than `:?` for the reason the input's description gives: `publish`
+# writes a second document naming every image at its digest and that document wins, so a
+# release host reads these two and discards them. A bare ${...} would warn once per
+# service per name on every command run against the artifact.
+#
+# The placeholders are deliberately not real image names, so a checkout whose .env lost
+# them fails on the pull rather than quietly running something that happens to exist.
+name: workflows-fixture-compose
+
+services:
+  # One service, naming the image fixture-image publishes to under the same formula. It
+  # is never pulled: the caller test runs on `pull_request`, where the workflow's `push`
+  # job skips, so nothing here is published or started.
+  app:
+    image: ${IMAGE_PREFIX:-unset-image-prefix}-fixture-image:${IMAGE_TAG:-unset-image-tag}
+    # Guarded with `:?`, which is what the compose job requires of every name the
+    # workflow does not set itself. The message names the file that owns the value.
+    environment:
+      FIXTURE_MESSAGE: ${FIXTURE_MESSAGE:?fixture-compose/.env}
