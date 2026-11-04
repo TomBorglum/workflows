@@ -108,16 +108,19 @@ jobs:
           # plain `needs` gate on an empty compose list.
           grep -qx 'fixture-compose' /tmp/compose/directories
 
-          # The whole directory travels, the .env included - and that file is hidden, so
-          # this is also the assertion that include-hidden-files is still set on the
-          # upload. Without it a release would publish a compose file whose variables
-          # resolve to placeholders.
           test -f /tmp/compose/fixture-compose/compose.yaml
-          test -f /tmp/compose/fixture-compose/.env
 
-          # Every interpolated name, placeholdered so the file can be rendered by
-          # something holding no values. The directory's own .env outranks it at publish
-          # time, which is why both files are present.
+          # The fixture carries NO .env, which is the point of it: every name in its
+          # compose file holds a `:?` or a `:-`, so the compose job staged and validated a
+          # directory without one. A caller needing an .env to publish would be a
+          # regression of the gate this asserts against.
+          test ! -e /tmp/compose/fixture-compose/.env
+
+          # Every interpolated name, placeholdered so `publish` can LOAD a file holding no
+          # values - `${FIXTURE_MESSAGE:?...}` would abort the load otherwise. It leaves no
+          # trace in the artifact: the compose file is published uninterpolated. This file
+          # is hidden, so its presence is also the assertion that include-hidden-files is
+          # still set on the upload.
           placeholders=/tmp/compose/fixture-compose/.placeholders.env
           test -f "$placeholders"
           for name in IMAGE_PREFIX IMAGE_TAG FIXTURE_MESSAGE; do

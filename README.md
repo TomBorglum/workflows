@@ -197,7 +197,8 @@ in outline:
 - Per image directory, a **`Dockerfile`** and a **`docker-bake.hcl` declaring
   `target "image"`**.
 - Per compose directory, a **`compose.yaml` declaring `name: <repository>-<directory>`**,
-  with every unguarded variable declared in a `.env` beside it.
+  with every variable it interpolates carrying a `:?` guard or a `:-` default. No `.env`
+  is required.
 - **No nested directories** in either list.
 
 #### Inputs

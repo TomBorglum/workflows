@@ -36,7 +36,7 @@ Before copying, `push` compares the two sets, catching a build that uploaded not
 artifact that arrived twice.
 
 `compose` loops over the compose directories rather than matrixing them, rendering only
-and building nothing. Per directory it stages the whole directory, the `.env` included,
+and building nothing. Per directory it stages the whole directory, any `.env` included,
 then renders it under `--profile '*'`. **The render proves the file loads, never that the
 repository declares its own variables.** `config --variables` lists every name the file
 interpolates without resolving any, and each gets a placeholder in a second env file
@@ -132,11 +132,14 @@ host. The job reads the **declared** key rather than `config`'s resolved `.name`
 `COMPOSE_PROJECT_NAME` would override — a deployer sets that to run a second copy beside
 the first, and it does not change what is published.
 
-It also fails a file whose unguarded names are not declared in the directory's own `.env`.
-An unguarded `${VAR}` renders blank rather than failing, and `up` then reports
-`invalid reference format` without naming it, so the declaration is the only guard left.
-A `:-` default leaves the variable not required, so it must still be declared in `.env`;
-a `:?` guard makes it required and needs no declaration.
+It also fails a file carrying a name with neither a `:?` guard nor a `:-` default. The
+artifact is published uninterpolated, so a deploy host resolves every name itself, with no
+`.env` and none of the placeholders staged here. A `:?` fails naming the variable; a `:-`
+default renders deliberately, and travels inside the artifact. A bare `${VAR}` renders an
+empty string and says nothing, and `up` then reports `invalid reference format` without
+naming it. **No `.env` is required.** A caller keeping one gets it staged and published
+alongside, but the gate does not read it: the file does not reach a deploy host, so it is
+not evidence that a value exists there.
 
 This workflow sets **`IMAGE_PREFIX`**, to `<namespace>/<repository>`, and **`IMAGE_TAG`**,
 to the tag being published, and names nothing else.

@@ -10,8 +10,12 @@
 # release host reads these two and discards them. A bare ${...} would warn once per
 # service per name on every command run against the artifact.
 #
-# The placeholders are deliberately not real image names, so a checkout whose .env lost
-# them fails on the pull rather than quietly running something that happens to exist.
+# The placeholders are deliberately not real image names, so a host that resolves these
+# fails on the pull rather than quietly running something that happens to exist.
+#
+# THERE IS NO .env HERE, deliberately. Every name below carries a `:?` or a `:-`, which
+# is the whole of what the compose job asks, so this fixture is the proof that a caller
+# needs no .env file to publish.
 name: workflows-fixture-compose
 
 services:
@@ -20,7 +24,8 @@ services:
   # job skips, so nothing here is published or started.
   app:
     image: ${IMAGE_PREFIX:-unset-image-prefix}-fixture-image:${IMAGE_TAG:-unset-image-tag}
-    # Guarded with `:?`, which is what the compose job requires of every name the
-    # workflow does not set itself. The message names the file that owns the value.
+    # Guarded with `:?`, one of the two forms the compose job accepts for a name the
+    # workflow does not set itself. The message is what a deploy host is told when the
+    # value is missing, so it names who owns it rather than a file in this repository.
     environment:
-      FIXTURE_MESSAGE: ${FIXTURE_MESSAGE:?fixture-compose/.env}
+      FIXTURE_MESSAGE: ${FIXTURE_MESSAGE:?set by the deployment}

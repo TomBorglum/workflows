@@ -36,11 +36,11 @@ on:
           project, its network and its volume are readable off the artifact's reference
           and two repositories cannot collide on one host. THE CONTRACT: this workflow sets
           IMAGE_PREFIX, to <namespace>/<repository>, and IMAGE_TAG, to the tag being
-          published, and NAMES NOTHING ELSE. Every other variable the file interpolates is
-          filled from the .env beside it where that file declares one, and with a
-          placeholder where it does not, a host path being the deployment's to supply. A
-          directory listed twice is refused. Empty by default, for a repository that
-          publishes images alone.
+          published, and NAMES NOTHING ELSE. Every other variable the file interpolates
+          must carry a `:?` guard or a `:-` default, because the file is published
+          uninterpolated and a bare ${...} renders empty on a deploy host. No .env is
+          required. A directory listed twice is refused. Empty by default, for a
+          repository that publishes images alone.
         required: false
         default: "[]"
         type: string
@@ -400,17 +400,24 @@ jobs:
                 "'${declared:-nothing}', expected '$expected'."
               exit 1
             fi
-            # The whole directory: the .env travels beside the file that needs it.
+            # The whole directory, so a caller keeping an .env beside its compose
+            # file gets it staged and published in the artifact alongside.
             mkdir -p "/tmp/compose-files/$directory"
             cp -R "$directory/." "/tmp/compose-files/$directory/"
             docker compose -f "$directory/compose.yaml" --profile '*' config --variables \
               --format json > /tmp/variables.json
-            # A name with no `:?` renders a WRONG value when unset rather than failing.
+            # `publish` uploads this file UNINTERPOLATED - verified against a published
+            # artifact - so a deploy host resolves every name below itself, with no .env
+            # and none of the placeholders staged here. A `:?` fails naming the variable
+            # and a `:-` default renders deliberately, but a bare ${...} renders an EMPTY
+            # string and says nothing, which is what this refuses. The default is the
+            # evidence of intent and it travels inside the artifact; .env does not, so
+            # whether the caller keeps one is its own business and not checked.
             for name in $(jq -r 'to_entries[]
-              | select(.value.Required | not) | .key' /tmp/variables.json); do
-              grep -qE "^[[:space:]]*$name=" "$directory/.env" 2>/dev/null && continue
-              echo "::error::$directory/compose.yaml leaves \$$name unguarded and" \
-                "$directory/.env does not declare it."
+              | select(.value.Required | not)
+              | select(.value.DefaultValue == "") | .key' /tmp/variables.json); do
+              echo "::error::$directory/compose.yaml leaves \$$name unguarded" \
+                "and gives it no default."
               exit 1
             done
             # EVERY name, listed without resolving any, so this reads a file nothing can
