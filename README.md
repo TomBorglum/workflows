@@ -215,7 +215,7 @@ in outline:
 | `aws-region` | *(required)* | Region the role is assumed in and the PAT parameter is read from. |
 | `aws-ssm-parameter` | *(required)* | Absolute SSM path holding the Docker Hub PAT. Not a secret: a path is an address. |
 | `dockerhub-namespace` | *(required)* | Docker Hub namespace every image publishes under. Must be the account the PAT belongs to, which nothing checks. |
-| `trivyignores` | *(none)* | Comma-separated paths to the Trivy ignore file(s) the scan should honour, relative to your repository root. Empty means **no** ignore file, not a default path. YAML and plain files cannot be mixed, and at most one `.yaml` file is accepted. |
+| `trivyignores` | *(none)* | Comma-separated list of relative paths within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml` file. Empty means **no** ignore file, not a default path. |
 
 #### Secrets
 

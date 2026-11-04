@@ -70,16 +70,11 @@ on:
         type: string
       trivyignores:
         description: >-
-          Comma-separated list of paths, relative to the repository root, to the Trivy
-          ignore file(s) the scan should honour. Passed to trivy-action verbatim, so its
-          rules apply: YAML and plain files CANNOT be mixed, and at most ONE .yaml file is
-          accepted. A named file that does not exist fails the scan with
-          `cannot find ignorefile`, which is the right answer to a typo.
-          EMPTY BY DEFAULT, and empty means no ignore file rather than a default path:
-          trivy-action tests this value for emptiness, so an unset input leaves the scan
-          with no --ignorefile at all. A repository that suppresses nothing therefore
-          needs no such file, and ONE THAT DOES HAS TO NAME IT HERE - a `.trivyignore.yaml`
-          sitting in the repository root is NOT picked up on its own.
+          Comma-separated list of relative paths within the repository to one or more
+          .trivyignore files, or a single .trivyignore.yaml file. Passed through verbatim.
+          EMPTY BY DEFAULT, and empty means no ignore file rather than a default path, so
+          a repository suppressing nothing needs none - and ONE THAT DOES HAS TO NAME IT
+          HERE, a .trivyignore.yaml in the root not being picked up on its own.
         required: false
         default: ''
         type: string
@@ -295,9 +290,9 @@ jobs:
           input: /tmp/oci
           scanners: vuln
           severity: HIGH,CRITICAL
-          # The caller's, and empty unless the caller named one: trivy-action skips its
-          # whole ignorefile block on an empty value, where a hardcoded path here failed
-          # every caller that had no such file.
+          # Empty unless the caller named one, and trivy-action skips its whole
+          # ignorefile block on an empty value. A hardcoded path here made the file
+          # mandatory for every caller.
           trivyignores: ${{ inputs.trivyignores }}
           format: json
           output: /tmp/trivy.json

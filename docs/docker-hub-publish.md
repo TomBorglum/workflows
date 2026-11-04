@@ -114,22 +114,14 @@ cannot walk, Trivy resolves the empty config `{}`, reports no findings and exits
 `{}` declares no platform.
 
 Suppressions are opt-in, through the **`trivyignores`** input: a comma-separated list of
-paths, relative to the repository root, naming the ignore file(s) the scan should honour.
+relative paths within the repository to one or more `.trivyignore` files, or a single
+`.trivyignore.yaml` file.
 
-**The input is empty by default, and empty means no ignore file rather than a default
-path.** trivy-action tests the value for emptiness, so an unset input leaves the scan with
-no `--ignorefile` at all. Two consequences:
-
-- A repository that suppresses nothing needs no such file, and nothing to configure.
-- A repository that **does** suppress something has to name the file here. A
-  `.trivyignore.yaml` sitting in the repository root is **not** picked up on its own, and
-  the failure is quiet in the safe direction: the suppressed findings come back and fail
-  the release, rather than a suppression applying unseen.
-
-trivy-action's own rules apply to the value, because it is passed through verbatim: YAML
-and plain files cannot be mixed, and at most one `.yaml` file is accepted. A named file
-that does not exist fails the scan with `cannot find ignorefile`, naming the path — which
-is the right answer to a typo.
+**Empty by default, and empty means no ignore file rather than a default path.** A
+repository that suppresses nothing needs none. One that does has to name it here — a
+`.trivyignore.yaml` in the root is not picked up on its own — and forgetting fails in the
+safe direction: the suppressed findings come back and fail the release, rather than a
+suppression applying unseen.
 
 Give every suppression an `expired_at` date. On that date Trivy stops honouring the entry
 and the finding fails the release again, so a suppression cannot outlive its reason by
