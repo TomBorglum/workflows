@@ -15,14 +15,13 @@ pins `job_workflow_ref` to its path. GitHub publishes no redirects for reusable 
 
 The OIDC exchange is performed by
 [`TomBorglum/actions/aws/assume-role`](https://github.com/TomBorglum/actions/tree/main/aws/assume-role),
-which the `push` job calls at a 40-char commit SHA. That pin is the control over what runs
-beside the live credential: the `# vX.Y.Z` comment on it is a label, and only the SHA
-decides which version of the action's scripts execute. Bumping it is a code change to the
-trusted job and is reviewed as one.
+which the `push` job calls at a 40-char commit SHA. The `# vX.Y.Z` comment beside it is a
+label; the SHA alone decides which version of the action's scripts runs beside the live
+credential.
 
-The extraction changed no claim. `sub`, `job_workflow_ref` and `job_workflow_sha` describe
-the calling repository and this workflow file; a composite action appears in no claim, so
-the trust policy below is the same policy it was before.
+A composite action appears in no OIDC claim. `sub`, `job_workflow_ref` and
+`job_workflow_sha` describe the calling repository and this workflow file, so the trust
+policy below is unaffected by it.
 
 ## What a caller must provide
 
@@ -191,11 +190,10 @@ Hub PAT out of SSM Parameter Store.
    carry at most one dot and cannot match, so a caller cannot be re-pointed at new workflow
    content by someone moving a tag.
 
-   That argument rests entirely on an exact `vX.Y.Z` being immutable, which requires a
-   **Restrict updates** rule and no bypass actor. `Restrict deletions` and `Block force
-   pushes` alone do not give it: neither blocks `git tag -f` followed by a push to an
-   existing tag ref, so the release automation's own bypass was enough to move one. See
-   "Restricting who can create tags" below for the two rulesets that close it.
+   That rests on an exact `vX.Y.Z` being immutable, which needs a **Restrict updates**
+   rule and no bypass actor. `Restrict deletions` and `Block force pushes` do not give it:
+   neither blocks `git tag -f` followed by a push to an existing tag ref, so any bypass
+   actor can move one. See "Restricting who can create tags" below.
    **Pin the caller to an exact `vX.Y.Z`**, never `@v1`.
 
    The `sub` form above is the **immutable** one, carrying the owner and repository IDs.
@@ -296,12 +294,11 @@ an exact version tag and stop it from moving one afterwards:
 `version-tags` covers `refs/tags/v*` rather than `refs/tags/v*.*.*` because this repository
 force-moves `vX` and `vX.Y` after each release, and the automation needs the bypass there
 or its own tag step fails. `released-versions` omits **Restrict creations**, which is what
-still lets the automation cut a release; rulesets are additive, so its three rules apply to
+still lets the automation cut a release. Rulesets are additive, so its three rules apply to
 an exact version on top of the first ruleset's and deny the App too.
 
-The cost is real: a release tag created wrong can no longer be corrected in place.
-Repairing one means disabling `released-versions`, fixing the tag and re-enabling it. That
-is what immutability costs, and it is the property the `v*.*.*` condition above depends on.
+A release tag created wrong can no longer be corrected in place. Repairing one means
+disabling `released-versions`, fixing the tag and re-enabling it.
 
 Verify rather than assume, for each repository:
 

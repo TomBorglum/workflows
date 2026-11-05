@@ -140,8 +140,8 @@ a Docker Hub PAT out of SSM Parameter Store. **No Docker Hub password or PAT is 
 stored as a GitHub secret.**
 
 The exchange is [`TomBorglum/actions/aws/assume-role`](https://github.com/TomBorglum/actions/tree/main/aws/assume-role),
-called at a pinned commit SHA. A composite action appears in no OIDC claim, so nothing a
-caller configures — the trust policy included — changes because of it.
+called at a pinned commit SHA. A composite action appears in no OIDC claim, so the trust
+policy a caller puts on the role is unaffected by it.
 
 [`docs/docker-hub-publish.md`](docs/docker-hub-publish.md) is the full reference: what a
 caller must provide, what fails a release, the AWS objects to create and the trust policy

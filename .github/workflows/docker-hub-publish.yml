@@ -10,12 +10,11 @@ name: Docker Hub publish
 # the PAT either. docs/docker-hub-publish.md documents the AWS objects and the whole
 # credential path.
 #
-# The OIDC exchange itself is TomBorglum/actions/aws/assume-role, pinned to a 40-char SHA
-# in `push`. The runner fetches it into its own action cache, not into GITHUB_WORKSPACE, so
-# the first invariant holds unchanged: a checkout step must never be added to make the
-# action resolve. Nothing about the claims changed with the extraction - a composite action
-# appears in no claim - so the role's trust policy still pins this file's
-# `job_workflow_ref` on a `v*.*.*` tag.
+# The OIDC exchange is TomBorglum/actions/aws/assume-role, pinned to a 40-char SHA in
+# `push`. The runner fetches it into its own action cache, not into GITHUB_WORKSPACE: a
+# checkout step must never be added to make it resolve. A composite action appears in no
+# OIDC claim, so the role's trust policy pins this file's `job_workflow_ref` on a `v*.*.*`
+# tag.
 
 # Every `github.*` reference below is the CALLER's event, which is what a called workflow
 # is given. The caller carries the triggers and the concurrency group.
@@ -54,8 +53,7 @@ on:
       aws-region:
         description: >-
           The region the release role is assumed in and the Docker Hub PAT parameter is
-          read from. Spelled as the `aws/assume-role` input it feeds, in `push`, which in
-          turn mirrors `configure-aws-credentials`.
+          read from. Spelled as the `aws/assume-role` input it feeds, in `push`.
         required: true
         type: string
       aws-ssm-parameter:
@@ -454,9 +452,8 @@ jobs:
           if-no-files-found: error
 
   # The trusted job. It checks nothing out: everything that runs in it is either a
-  # SHA-pinned action or a `run` block written in this file. aws/assume-role is one of
-  # those SHA-pinned actions, so its scripts are part of this job's trusted surface and
-  # the pin is the whole of the control over which version of them runs.
+  # SHA-pinned action or a `run` block written in this file. aws/assume-role's scripts are
+  # part of that trusted surface; its pin decides which version of them runs.
   push:
     needs: [meta, build, compose]
     if: github.event_name == 'release'
@@ -467,10 +464,10 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # FIRST, so a bad parameter path fails before anything is downloaded. The SSM path
-      # is the one value aws/assume-role knows nothing about; it checks the region and the
-      # role ARN itself, in its own first step, before it touches STS. No message echoes
-      # the value it rejected, so this states the shape instead.
+      # FIRST, so a bad parameter path fails before anything is downloaded. aws/assume-role
+      # checks the region and the role ARN in its own first step, before it touches STS;
+      # the SSM path is the one value it knows nothing about. No message echoes the value
+      # it rejected.
       - name: Check the SSM parameter path
         env:
           AWS_SSM_PARAMETER: ${{ inputs.aws-ssm-parameter }}
@@ -502,15 +499,12 @@ jobs:
           # Pinned, not the action's `latest`: this binary runs while the credential is live.
           release: v0.11.7
 
-      # HERE, not earlier: every download and installer above runs before the credential
-      # exists, so the window in which this job holds a live credential is as short as the
-      # steps that need one.
+      # HERE, not earlier: the downloads and installers above run before the credential
+      # exists, so its live window is only as long as the steps that need it.
       #
-      # The action validates the region and the ARN, dumps the claims and calls STS, in
-      # that order. Three properties it fixes internally and this file no longer states:
-      # the account id STS returns is masked, the credentials become step outputs, and no
-      # AWS_* variable reaches the job environment - so a step that needs one has to name
-      # it and the rest never see it.
+      # The action validates the region and the ARN, dumps the claims, then calls STS.
+      # Three properties it fixes internally: the account id STS returns is masked, the
+      # credentials are step outputs, and no AWS_* variable reaches the job environment.
       - name: Assume the release role
         id: creds
         uses: TomBorglum/actions/aws/assume-role@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
@@ -519,15 +513,9 @@ jobs:
           # action runs: an input would publish the account id on every release.
           aws-role-arn: ${{ secrets.aws-role-arn }}
           aws-region: ${{ inputs.aws-region }}
-          # The claims AWS conditions on, dumped before any AWS call, so a trust-policy
-          # mismatch is diagnosable from this run. This is the only place the tag-shaped
-          # `sub` and `job_workflow_ref` can be observed. Only the payload is decoded: the
-          # token itself is a live credential and never reaches the log. The action
-          # defaults this off; a release wants it on.
           show-claims: true
-          # audience, session-duration and session-name are left at the action's defaults,
-          # which are sts.amazonaws.com, 900 seconds and `<run_id>-<run_attempt>` - the
-          # same three values this step passed explicitly before the extraction.
+          # audience, session-duration and session-name keep the action's defaults:
+          # sts.amazonaws.com, 900 seconds, `<run_id>-<run_attempt>`.
 
       # The only step that touches the PAT, piped straight from SSM into `docker login`,
       # so it occupies no variable, output or file. regctl and cosign read what that wrote.
