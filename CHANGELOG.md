@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/TomBorglum/workflows/compare/v1.0.2...v1.1.0) (2026-11-05)
+
+
+### Features
+
+* add docker-hub-publish workflow ([#10](https://github.com/TomBorglum/workflows/issues/10)) ([41a3bfd](https://github.com/TomBorglum/workflows/commit/41a3bfd28fd1e3f2db96ce6be4f4291579987ddc))
+
 ## [1.0.2](https://github.com/TomBorglum/workflows/compare/v1.0.1...v1.0.2) (2026-10-26)
 
 
