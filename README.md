@@ -139,9 +139,9 @@ AWS: the publishing job mints a GitHub OIDC token, assumes an IAM role with it, 
 a Docker Hub PAT out of SSM Parameter Store. **No Docker Hub password or PAT is ever
 stored as a GitHub secret.**
 
-[`docs/docker-hub-publish.md`](docs/docker-hub-publish.md) is the full reference: the four
-jobs, the credential path, the gates, the AWS objects to create and the trust policy to
-put on the role.
+[`docs/docker-hub-publish.md`](docs/docker-hub-publish.md) is the full reference: what a
+caller must provide, what fails a release, the AWS objects to create and the trust policy
+to put on the role.
 
 ```yaml
 name: Publish

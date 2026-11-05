@@ -2,55 +2,13 @@
 
 Reference for
 [`.github/workflows/docker-hub-publish.yml`](../.github/workflows/docker-hub-publish.yml):
-the jobs it runs, the credential path it takes to Docker Hub, the gates it applies, and
-the AWS objects a caller has to create for it.
+what a caller must provide, what fails a release, and the AWS and GitHub objects that live
+outside the repository. The workflow file documents its own jobs and steps.
 
 Placeholders throughout: `<owner>` and `<repository>` are the **calling** repository,
 `<directory>` one of the directories it hands over, `<namespace>` the Docker Hub account,
 `<account-id>` the 12-digit AWS account id, `<region>` the AWS region and `<project>` a
 name of the caller's choosing for its SSM paths.
-
-## The four jobs
-
-```
-caller  ->  meta  ->  build (matrix: one leg per image directory)  -\
-                                                                     >-  push
-            compose  ------------------------------------------------/
-            \______________ docker-hub-publish.yml _________________/
-```
-
-The caller holds the triggers, the concurrency group and every value belonging to its own
-repository: the image directories, `aws-region`, `aws-ssm-parameter`,
-`dockerhub-namespace` and the `aws-role-arn` secret. This workflow reads no `vars` and
-names no AWS object.
-
-**`build` and `compose` check out repository code and get `contents: read` with no
-`id-token: write`.** `push` holds the credentials and **checks nothing out**, so
-everything executing in it is a SHA-pinned action or a `run` block in the workflow file.
-That split is an invariant; a change breaking it is a security regression.
-
-`build` hands `push` an OCI archive and the digest it built, through an artifact.
-**`push` re-derives the digest after staging and fails if it moved.** Each artifact also
-carries the repository its image publishes to, so no step in `push` names a directory.
-Before copying, `push` compares the two sets, catching a build that uploaded nothing or an
-artifact that arrived twice.
-
-`compose` loops over the compose directories rather than matrixing them, rendering only
-and building nothing. Per directory it stages the whole directory, any `.env` included,
-then renders it under `--profile '*'`. **The render proves the file loads, never that the
-repository declares its own variables.** `config --variables` lists every name the file
-interpolates without resolving any, and each gets a placeholder in a second env file
-staged beside the first; `--env-file` turns the auto-loading of `.env` off, so both are
-named explicitly and the directory's own file goes second, where the later file wins. A
-bind source is the deployment's to name, and **the published artifact is the source file
-byte for byte** — one layer, `application/vnd.docker.compose.file+yaml`, every `${...}`
-intact — so no placeholder reaches what is published. One artifact carries every
-directory, plus the manifest of directory names `push` reads. The job also asserts
-`docker compose publish` exists on the runner. It carries no `if:` and so never skips,
-which is what lets `push` keep a plain `needs` gate when no compose directory is given.
-
-`push` carries `if: github.event_name == 'release'`. On every other event it skips, so a
-pull request builds, scans and gates everything and publishes nothing.
 
 **Renaming this file or this repository breaks every caller's AWS trust policy**, which
 pins `job_workflow_ref` to its path. GitHub publishes no redirects for reusable workflows.
@@ -59,59 +17,26 @@ pins `job_workflow_ref` to its path. GitHub publishes no redirects for reusable 
 
 | Requirement | Why |
 | --- | --- |
-| `id-token: write` on the calling job | `push` mints the OIDC token with it. A caller granting less fails at that job, not at parse time |
-| A `Dockerfile` and a `docker-bake.hcl` declaring `target "image"` in each image directory | `bake-target: image` and `targets: image` are fixed in this workflow |
-| A `compose.yaml` declaring `name: <repository>-<directory>` in each compose directory | Checked by `compose`. See [What the compose job gates](#what-the-compose-job-gates) |
+| `id-token: write` on the calling job | The permissions ceiling is validated at run start, so a caller granting less fails with `startup_failure` and no job logs |
+| The triggers and the concurrency group | This workflow declares neither. See [Concurrency](#concurrency) |
+| A `Dockerfile` and a `docker-bake.hcl` declaring `target "image"` per image directory | `bake-target: image` and `targets: image` are fixed in this workflow |
+| A `compose.yaml` declaring `name: <repository>-<directory>` per compose directory | Gated. See [What fails a release](#what-fails-a-release) |
 | Non-nested directories | `compose` refuses a nested directory, and the build artifact is named `image-<directory>`, which cannot contain a slash |
+| A Docker Hub namespace matching the PAT's own account | Nothing checks it |
 | The AWS objects below | |
 
-## How the credential is reached
+No `.env` file is required beside a compose file, and no `.trivyignore` file is required
+anywhere.
 
-Docker Hub supports no OIDC for personal accounts, so AWS stands in: the job mints a
-GitHub OIDC token, exchanges it for temporary credentials on a role whose trust policy
-accepts only one caller running this workflow at a version tag, and reads a Docker Hub PAT
-out of SSM Parameter Store.
-
-- The **role ARN is a secret at both ends**, because the runner echoes a step's `with:`
-  block before the action runs. `mask-aws-account-id: true` masks the account id and the
-  `authenticated-arn` STS returns, so a wrong ARN logs as `***`.
-- **`role-session-name` carries the run id and attempt**, OIDC auth dropping the action's
-  own session tags, so it is the only channel by which a run reaches CloudTrail.
-- `aws-actions/configure-aws-credentials` runs `output-credentials: true` and
-  **`output-env-credentials: false`**, so credentials are step outputs rather than job
-  environment variables.
-- The PAT is piped **straight** from `aws ssm get-parameter` into
-  `docker login --password-stdin`, never occupying a variable, step output or file.
-  `regctl` and `cosign` both read what `docker login` wrote.
-- **`cosign-installer` runs before `regctl-installer`.** The regctl installer verifies its
-  download against regclient's cosign signature `if [ -x "$(command -v cosign)" ]`.
-- **`regctl` does the push**, copying the OCI layout's index byte for byte, so one digest
-  spans the scan, the push, the attestations and the signature.
-
-`push` dumps the decoded OIDC claims **before** its first AWS call, so a trust-policy
-mismatch is diagnosable from the failed run itself. Only the payload is decoded; the token
-is a live credential and never reaches the log.
-
-Each image carries an SBOM and a SLSA provenance attestation at `mode=max`, which records
-the **whole GitHub event payload**, on a pull request including its body. It is published,
-so this is acceptable only while the **calling** repository is public. A private caller
-should weigh `mode=min` before adopting this workflow.
+`push` runs on the `release` event alone. Every other event builds, scans and gates, and
+publishes nothing.
 
 Images are built for the runner's architecture. Publishing `linux/arm64` as well starts
 with the caller's own build being able to produce it.
 
-## The vulnerability gate
+## What fails a release
 
-Each image is scanned by Trivy before anything is published, and a HIGH or CRITICAL
-finding fails the release. The scan runs over the **unpacked** OCI layout: Trivy rejects
-an archive outright, and a layout written by `regctl image import` leads with a referrers
-index, which Trivy reads first, resolves nothing from, and then reports zero
-vulnerabilities and success.
-
-The gate therefore also asserts identity: **the `ImageID` Trivy reports has to name a
-config present in the scanned layout and declaring a platform.** Pointed at a layout it
-cannot walk, Trivy resolves the empty config `{}`, reports no findings and exits 0, and
-`{}` declares no platform.
+A **HIGH or CRITICAL** Trivy finding in any image.
 
 Suppressions go in the **`trivyignores`** input: a comma-separated list of relative paths
 within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml`
@@ -122,27 +47,36 @@ and the finding fails the release again, so a suppression cannot outlive its rea
 being forgotten. Removing the date instead of extending it turns the file into a permanent
 blind spot.
 
-## What the compose job gates
+A `compose.yaml` **not declaring `name: <repository>-<directory>`**. The formula is the
+images' own, so an operator reads the project, its network
+(`<repository>-<directory>_default`) and its volumes off the artifact's reference, and two
+repositories cannot collide on one host. The **declared** key is what is read, not
+`config`'s resolved `.name`, so setting `COMPOSE_PROJECT_NAME` does not satisfy this.
 
-The `compose` job fails a release whose `compose.yaml` does not declare
-`name: <repository>-<directory>`, or whose directory is nested. The formula is the images'
-own, so an operator reads the project, its network (`<repository>-<directory>_default`)
-and its volumes off the artifact's reference, and two repositories cannot collide on one
-host. The job reads the **declared** key rather than `config`'s resolved `.name`, which
-`COMPOSE_PROJECT_NAME` would override — a deployer sets that to run a second copy beside
-the first, and it does not change what is published.
-
-It also fails a file carrying a name with neither a `:?` guard nor a `:-` default. The
-artifact is published uninterpolated, so a deploy host resolves every name itself, with no
-`.env` and none of the placeholders staged here. A `:?` fails naming the variable; a `:-`
-default renders deliberately, and travels inside the artifact. A bare `${VAR}` renders an
-empty string and says nothing, and `up` then reports `invalid reference format` without
-naming it. **No `.env` is required.** A caller keeping one gets it staged and published
-alongside, but the gate does not read it: the file does not reach a deploy host, so it is
-not evidence that a value exists there.
+A `compose.yaml` carrying a name with **neither a `:?` guard nor a `:-` default**. The
+compose file is published uninterpolated, so a deploy host resolves every name itself with
+no env file of any kind. A `:?` fails naming the variable, and a `:-` default renders
+deliberately and travels inside the artifact. A bare `${VAR}` renders an empty string and
+says nothing; `up` then reports `invalid reference format` without naming it. `${VAR:-}` is
+indistinguishable from bare and is refused with it.
 
 This workflow sets **`IMAGE_PREFIX`**, to `<namespace>/<repository>`, and **`IMAGE_TAG`**,
 to the tag being published, and names nothing else.
+
+## What is published
+
+Per image directory, `<namespace>/<repository>-<directory>` at the release tag, carrying an
+SBOM and a SLSA provenance attestation, plus a cosign signature.
+
+Per compose directory, `<namespace>/<repository>-<directory>` as an OCI compose artifact of
+two layers: the source `compose.yaml` **byte for byte**, every `${...}` intact, and an
+`image-digests.yaml` naming each service's image at its digest. `--with-env` is not passed,
+so no env file is published and no value from one reaches the artifact.
+
+Provenance runs at `mode=max`, which records the **whole GitHub event payload**, on a pull
+request including its body. It is published, so this is acceptable only while the
+**calling** repository is public. A private caller should weigh `mode=min` before adopting
+this workflow.
 
 ## The AWS objects
 
@@ -150,6 +84,11 @@ Created once, by hand. `<account-id>` never needs to appear in the calling repos
 ARN carrying it is a repository **secret**. Everything here sits inside AWS's
 **always-free** tier: IAM, STS, the OIDC provider, a standard-tier SSM parameter and the
 AWS-managed `aws/ssm` key.
+
+Docker Hub supports no OIDC for personal accounts, which is why AWS stands in at all: the
+job mints a GitHub OIDC token, exchanges it for temporary credentials on a role whose trust
+policy accepts only one caller running this workflow at a version tag, and reads a Docker
+Hub PAT out of SSM Parameter Store.
 
 1. **Docker Hub.** Create each repository explicitly, so visibility is set before the
    first push. Then a personal access token with **Read & Write** and no Delete; a
@@ -258,13 +197,13 @@ AWS-managed `aws/ssm` key.
    parameter path above, rather than a prefix, is what holds this role away from every
    other parameter under the same key.
 
-4. **Repository variables and one secret** in the calling repository.
+4. **One secret and two values** in the calling repository.
 
    - **Secret** holding `arn:aws:iam::<account-id>:role/gha-<repository>-release`, passed
-     as the `aws-role-arn` secret. A fork's pull request gets no secrets, and `push` runs
-     on the release event alone.
-   - The Docker Hub namespace, passed as `dockerhub-namespace`. It has to be the account
-     the PAT belongs to, which nothing checks.
+     as the `aws-role-arn` secret. The role ARN is a secret at both ends because the runner
+     echoes a step's `with:` block before the action runs. A fork's pull request gets no
+     secrets, and `push` runs on the release event alone.
+   - The Docker Hub namespace, passed as `dockerhub-namespace`.
    - The region, passed as `aws-region`.
 
    The SSM path is neither: the caller passes it as the `aws-ssm-parameter` input. It is
@@ -298,6 +237,13 @@ gh api repos/<owner>/<repository>/rulesets/<id> \
 A tag ruleset whose rules are `deletion` and `non_fast_forward` alone makes existing tags
 immutable and still lets anyone with write access create a new one.
 
+## Concurrency
+
+Declare the concurrency group in the **caller**. GitHub cancels the caller when caller and
+called share a group, and a run stopped partway through `push` can leave one image
+published and another not. Condition `cancel-in-progress` on the event: **a release run
+must never be cancelled**, where a superseded pull request run should be.
+
 ## Verifying a release
 
 ```sh
@@ -312,15 +258,10 @@ docker compose -f oci://docker.io/<namespace>/<repository>-<directory>:<version>
 referrer** rather than a `sha256-<digest>.sig` tag, so a tag listing shows the published
 tags and nothing more.
 
-**If the exchange is refused**, read the claim dump in the failed `push` job, correct the
-trust policy in the console and re-run the failed job: the AWS side lives outside the tag,
-so that loop is free.
+**If the exchange is refused**, read the decoded OIDC claims the `push` job dumps before
+its first AWS call, correct the trust policy in the console and re-run the failed job: the
+AWS side lives outside the tag, so that loop is free.
 
 **If the workflow file itself is wrong**, a `release` event runs the caller as it exists on
 the tag, so the fix is a patch release of the caller — or, for a bug in this workflow, a
 patch release here and a bumped pin.
-
-**A release run must never be cancelled**, where a superseded pull request run should be.
-Declare the concurrency group in the **caller**, because GitHub cancels the caller when
-caller and called share a group, and condition `cancel-in-progress` on the event: a run
-stopped partway through `push` can leave one image published and another not.

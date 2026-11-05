@@ -293,7 +293,9 @@ jobs:
           exit-code: 0
 
       # TWO assertions, because a passing trivy run does not mean THIS image was scanned:
-      # identity first, then the findings. docs/docker-hub-publish.md covers the gate.
+      # identity first, then the findings. Pointed at a layout it cannot walk, trivy
+      # resolves the empty config `{}`, reports nothing and exits 0 - and `{}` declares no
+      # platform, which is what the identity assertion catches.
       - name: Gate on the scan
         env:
           DIRECTORY: ${{ matrix.directory }}
