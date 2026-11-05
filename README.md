@@ -139,6 +139,10 @@ AWS: the publishing job mints a GitHub OIDC token, assumes an IAM role with it, 
 a Docker Hub PAT out of SSM Parameter Store. **No Docker Hub password or PAT is ever
 stored as a GitHub secret.**
 
+The exchange is [`TomBorglum/actions/aws/assume-role`](https://github.com/TomBorglum/actions/tree/main/aws/assume-role),
+called at a pinned commit SHA. A composite action appears in no OIDC claim, so nothing a
+caller configures — the trust policy included — changes because of it.
+
 [`docs/docker-hub-publish.md`](docs/docker-hub-publish.md) is the full reference: what a
 caller must provide, what fails a release, the AWS objects to create and the trust policy
 to put on the role.
@@ -278,7 +282,15 @@ These are GitHub's, not this repository's, and they shape how it is laid out:
 
 `main` is protected by a repository ruleset: pull requests only, linear history, no
 force-pushes or deletions, and a required SonarCloud check — with no bypass actors,
-including for maintainers. Version tags have their own ruleset making them immutable.
+including for maintainers.
+
+Version tags are governed by two tag rulesets. `version-tags` covers `refs/tags/v*` and
+restricts creations, updates, deletions and force pushes, with the release App as its only
+bypass actor, so no human creates or moves a version tag. `released-versions` covers
+`refs/tags/v*.*.*` and restricts updates, deletions and force pushes with **no** bypass
+actor, so an exact version that exists cannot be moved or deleted by anyone, the App
+included. That second ruleset is what the AWS trust policy's `v*.*.*` condition rests on;
+[`docs/docker-hub-publish.md`](docs/docker-hub-publish.md) explains why both are needed.
 
 Every third-party action used here, in this repository's own CI or inside a published
 reusable workflow, is pinned to a full commit SHA; Dependabot keeps those pins fresh,
