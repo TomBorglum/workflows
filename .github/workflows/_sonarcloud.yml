@@ -21,17 +21,6 @@ jobs:
         with:
           # Full history so SonarCloud can attribute issues to the right commits.
           fetch-depth: 0
-      # Provide the JRE ourselves so the scanner doesn't query SonarCloud's API to
-      # download one at runtime (a transient point of failure). Paired with
-      # sonar.scanner.skipJreProvisioning below.
-      - name: Set up JDK
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: TomBorglum/actions/sonar/scan@f3028cddd68f2efc77b63a3f4fd749e541c8701c # v3.1.0
         with:
-          distribution: temurin
-          java-version: '17'
-      - name: SonarQube Cloud Scan
-        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
-        with:
-          args: -Dsonar.scanner.skipJreProvisioning=true
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
