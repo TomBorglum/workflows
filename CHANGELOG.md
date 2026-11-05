@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/TomBorglum/workflows/compare/v1.1.0...v1.1.1) (2026-11-05)
+
+
+### Dependencies
+
+* update sonar scan ([#15](https://github.com/TomBorglum/workflows/issues/15)) ([52df4d1](https://github.com/TomBorglum/workflows/commit/52df4d11e8517640f84309fe81403860a32c1beb))
+
 ## [1.1.0](https://github.com/TomBorglum/workflows/compare/v1.0.2...v1.1.0) (2026-11-05)
 
 
