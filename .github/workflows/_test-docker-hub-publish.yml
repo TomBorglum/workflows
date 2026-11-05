@@ -54,9 +54,8 @@ jobs:
     with:
       image-directories: '["fixture-image"]'
       compose-directories: '["fixture-compose"]'
-      # Well-formed but inert. Both checks - the SSM path's, and aws/assume-role's on the
-      # region and the ARN - live in `push`, which skips here, so these only have to
-      # satisfy the declarations.
+      # Well-formed but inert. Everything that validates them runs in `push`, which skips
+      # here, so these only have to satisfy the declarations.
       aws-region: eu-north-1
       aws-ssm-parameter: /fixture/release/dockerhub-pat
       dockerhub-namespace: fixture-namespace

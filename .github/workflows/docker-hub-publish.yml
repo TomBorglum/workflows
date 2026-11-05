@@ -464,10 +464,9 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # FIRST, so a bad parameter path fails before anything is downloaded. aws/assume-role
-      # checks the region and the role ARN in its own first step, before it touches STS;
-      # the SSM path is the one value it knows nothing about. No message echoes the value
-      # it rejected.
+      # FIRST, so a bad parameter path fails before anything is downloaded. The SSM path is
+      # the one value aws/assume-role takes no input for, so this is the only step that can
+      # check it. No message echoes the value it rejected.
       - name: Check the SSM parameter path
         env:
           AWS_SSM_PARAMETER: ${{ inputs.aws-ssm-parameter }}
@@ -501,10 +500,6 @@ jobs:
 
       # HERE, not earlier: the downloads and installers above run before the credential
       # exists, so its live window is only as long as the steps that need it.
-      #
-      # The action validates the region and the ARN, dumps the claims, then calls STS.
-      # Three properties it fixes internally: the account id STS returns is masked, the
-      # credentials are step outputs, and no AWS_* variable reaches the job environment.
       - name: Assume the release role
         id: creds
         uses: TomBorglum/actions/aws/assume-role@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
@@ -514,8 +509,6 @@ jobs:
           aws-role-arn: ${{ secrets.aws-role-arn }}
           aws-region: ${{ inputs.aws-region }}
           show-claims: true
-          # audience, session-duration and session-name keep the action's defaults:
-          # sts.amazonaws.com, 900 seconds, `<run_id>-<run_attempt>`.
 
       # The only step that touches the PAT, piped straight from SSM into `docker login`,
       # so it occupies no variable, output or file. regctl and cosign read what that wrote.
