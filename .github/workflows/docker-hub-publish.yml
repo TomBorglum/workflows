@@ -9,6 +9,12 @@ name: Docker Hub publish
 # an AWS object. The logs are world-readable, so nothing added may print the account id or
 # the PAT either. docs/docker-hub-publish.md documents the AWS objects and the whole
 # credential path.
+#
+# The OIDC exchange is TomBorglum/actions/aws/assume-role, pinned to a 40-char SHA in
+# `push`. The runner fetches it into its own action cache, not into GITHUB_WORKSPACE: a
+# checkout step must never be added to make it resolve. A composite action appears in no
+# OIDC claim, so the role's trust policy pins this file's `job_workflow_ref` on a `v*.*.*`
+# tag.
 
 # Every `github.*` reference below is the CALLER's event, which is what a called workflow
 # is given. The caller carries the triggers and the concurrency group.
@@ -47,7 +53,7 @@ on:
       aws-region:
         description: >-
           The region the release role is assumed in and the Docker Hub PAT parameter is
-          read from. Spelled as the `configure-aws-credentials` input it feeds, in `push`.
+          read from. Spelled as the `aws/assume-role` input it feeds, in `push`.
         required: true
         type: string
       aws-ssm-parameter:
@@ -446,7 +452,8 @@ jobs:
           if-no-files-found: error
 
   # The trusted job. It checks nothing out: everything that runs in it is either a
-  # SHA-pinned action or a `run` block written in this file.
+  # SHA-pinned action or a `run` block written in this file. aws/assume-role's scripts are
+  # part of that trusted surface; its pin decides which version of them runs.
   push:
     needs: [meta, build, compose]
     if: github.event_name == 'release'
@@ -457,49 +464,19 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # FIRST, so a misconfigured caller fails before any credential handling begins. No
-      # message echoes the value it rejected - the ARN's would print as `***` - so each
-      # states the shape instead.
-      - name: Check the release configuration
+      # FIRST, so a bad parameter path fails before anything is downloaded. The SSM path is
+      # the one value aws/assume-role takes no input for, so this is the only step that can
+      # check it. No message echoes the value it rejected.
+      - name: Check the SSM parameter path
         env:
-          AWS_REGION: ${{ inputs.aws-region }}
-          AWS_ROLE_ARN: ${{ secrets.aws-role-arn }}
           AWS_SSM_PARAMETER: ${{ inputs.aws-ssm-parameter }}
         run: |
           set -euo pipefail
-          if [[ ! "$AWS_REGION" =~ ^[a-z0-9-]+$ ]]; then
-            echo "::error::aws-region must match ^[a-z0-9-]+$"
-            exit 1
-          fi
-          # The ARN form specifically: configure-aws-credentials accepts a bare role NAME
-          # too, resolving it against the source account, and this rejects that.
-          if [[ ! "$AWS_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+$ ]]; then
-            echo "::error::aws-role-arn must be an IAM role ARN, not a bare role name"
-            exit 1
-          fi
           if [[ ! "$AWS_SSM_PARAMETER" =~ ^/[A-Za-z0-9./_-]+$ ]]; then
             echo "::error::aws-ssm-parameter must be an absolute SSM parameter path"
             exit 1
           fi
-          echo "region, role ARN and parameter path all well-formed"
-
-      # The claims AWS conditions on, dumped before any AWS call, so a trust-policy
-      # mismatch is diagnosable from this run. The only place the tag-shaped `sub` and
-      # `job_workflow_ref` can be observed. Only the payload is decoded: the token itself
-      # is a live credential and never reaches the log.
-      - name: Show the OIDC token claims
-        run: |
-          set -euo pipefail
-          token="$(curl -fsSL --proto '=https' \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
-            | jq -r .value)"
-          payload="$(echo "$token" | cut -d. -f2)"
-          # base64url -> base64, then pad to a multiple of 4 so base64 -d accepts it.
-          payload="${payload//-/+}"
-          payload="${payload//_//}"
-          while (( ${#payload} % 4 )); do payload+="="; done
-          echo "$payload" | base64 -d | jq .
+          echo "parameter path well-formed"
 
       # Untrusted bytes, safe here because nothing in this job executes them.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -521,22 +498,17 @@ jobs:
           # Pinned, not the action's `latest`: this binary runs while the credential is live.
           release: v0.11.7
 
-      - name: Configure AWS credentials
+      # HERE, not earlier: the downloads and installers above run before the credential
+      # exists, so its live window is only as long as the steps that need it.
+      - name: Assume the release role
         id: creds
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        uses: TomBorglum/actions/aws/assume-role@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
         with:
           # A SECRET, because the runner echoes this `with:` block into the log before the
           # action runs: an input would publish the account id on every release.
-          role-to-assume: ${{ secrets.aws-role-arn }}
+          aws-role-arn: ${{ secrets.aws-role-arn }}
           aws-region: ${{ inputs.aws-region }}
-          role-session-name: ${{ github.run_id }}-${{ github.run_attempt }}
-          role-duration-seconds: 900
-          # Not redundant with the ARN masked: this covers what STS RETURNS.
-          mask-aws-account-id: true
-          # The credentials become step outputs instead of job environment, so a step that
-          # needs them has to name them and the rest never see them.
-          output-credentials: true
-          output-env-credentials: false
+          show-claims: true
 
       # The only step that touches the PAT, piped straight from SSM into `docker login`,
       # so it occupies no variable, output or file. regctl and cosign read what that wrote.

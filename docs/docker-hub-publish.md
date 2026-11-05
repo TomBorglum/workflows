@@ -13,6 +13,16 @@ name of the caller's choosing for its SSM paths.
 **Renaming this file or this repository breaks every caller's AWS trust policy**, which
 pins `job_workflow_ref` to its path. GitHub publishes no redirects for reusable workflows.
 
+The OIDC exchange is performed by
+[`TomBorglum/actions/aws/assume-role`](https://github.com/TomBorglum/actions/tree/main/aws/assume-role),
+which the `push` job calls at a 40-char commit SHA. The `# vX.Y.Z` comment beside it is a
+label; the SHA alone decides which version of the action's scripts runs beside the live
+credential.
+
+A composite action appears in no OIDC claim. `sub`, `job_workflow_ref` and
+`job_workflow_sha` describe the calling repository and this workflow file, so the trust
+policy below is unaffected by it.
+
 ## What a caller must provide
 
 | Requirement | Why |
@@ -176,9 +186,14 @@ Hub PAT out of SSM Parameter Store.
    public workflow.
 
    **`v*.*.*` on `job_workflow_ref` is deliberate.** A `StringLike` `*` matches dots, so
-   two literal dots admit only the exact `vX.Y.Z` tags, which a ruleset in this repository
-   makes immutable. The moving `vX` and `vX.Y` tags carry at most one dot and cannot
-   match, so a caller cannot be re-pointed at new workflow content by someone moving a tag.
+   two literal dots admit only the exact `vX.Y.Z` tags. The moving `vX` and `vX.Y` tags
+   carry at most one dot and cannot match, so a caller cannot be re-pointed at new workflow
+   content by someone moving a tag.
+
+   That rests on an exact `vX.Y.Z` being immutable, which needs a **Restrict updates**
+   rule and no bypass actor. `Restrict deletions` and `Block force pushes` do not give it:
+   neither blocks `git tag -f` followed by a push to an existing tag ref, so any bypass
+   actor can move one. See "Restricting who can create tags" below.
    **Pin the caller to an exact `vX.Y.Z`**, never `@v1`.
 
    The `sub` form above is the **immutable** one, carrying the owner and repository IDs.
@@ -265,13 +280,25 @@ role trusts: a tag in the caller satisfies `sub`, and a tag in this repository c
 altered workflow satisfies `job_workflow_ref`.
 
 Branch protection does not close this. A ruleset on the default branch gates what reaches
-`main`; it says nothing about what a tag points at. Close it in both repositories with a
-**tag** ruleset carrying **Restrict creations**, **Restrict deletions** and **Block force
-pushes**, and only the release automation as a bypass actor.
+`main`; it says nothing about what a tag points at.
 
-Where tags are major-aliased — this repository force-moves `vX` and `vX.Y` after each
-release — the ruleset has to cover `refs/tags/v*` rather than `refs/tags/v*.*.*`, and the
-automation needs the bypass or its own tag step fails.
+Close it in both repositories with **two** tag rulesets. Bypass actors are configured per
+ruleset rather than per rule, so one ruleset cannot both let the release automation create
+an exact version tag and stop it from moving one afterwards:
+
+| Ruleset | Include | Rules | Bypass |
+| --- | --- | --- | --- |
+| `version-tags` | `refs/tags/v*` | Restrict creations, Restrict updates, Restrict deletions, Block force pushes | the release App, mode **Always** |
+| `released-versions` | `refs/tags/v*.*.*` | Restrict updates, Restrict deletions, Block force pushes | **none** |
+
+`version-tags` covers `refs/tags/v*` rather than `refs/tags/v*.*.*` because this repository
+force-moves `vX` and `vX.Y` after each release, and the automation needs the bypass there
+or its own tag step fails. `released-versions` omits **Restrict creations**, which is what
+still lets the automation cut a release. Rulesets are additive, so its three rules apply to
+an exact version on top of the first ruleset's and deny the App too.
+
+A release tag created wrong can no longer be corrected in place. Repairing one means
+disabling `released-versions`, fixing the tag and re-enabling it.
 
 Verify rather than assume, for each repository:
 
@@ -281,8 +308,10 @@ gh api repos/<owner>/<repository>/rulesets/<id> \
   --jq '{conditions, rules: [.rules[].type], bypass_actors}'
 ```
 
-A tag ruleset whose rules are `deletion` and `non_fast_forward` alone makes existing tags
-immutable and still lets anyone with write access create a new one.
+A tag ruleset whose rules are `deletion` and `non_fast_forward` alone makes neither
+guarantee: anyone with write access can still create a new matching tag, and anyone who can
+bypass the ruleset can still move an existing one. `creation` closes the first and `update`
+the second, and only an empty bypass list closes the second against the automation.
 
 ## Concurrency
 
