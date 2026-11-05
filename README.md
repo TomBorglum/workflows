@@ -21,6 +21,7 @@ jobs:
 
 | Workflow | Purpose |
 | --- | --- |
+| [`docker-hub-publish.yml`](#docker-hub-publish) | Build, scan, sign and publish one container image per directory to Docker Hub, plus an OCI compose artifact per compose directory, using GitHub OIDC and AWS to reach a Docker Hub credential. |
 | [`update-pixi-dependencies.yml`](#update-pixi-dependencies) | Upgrade a [pixi](https://pixi.sh) workspace's dependencies and open a pull request with what moved — the updater Dependabot has no `pixi` ecosystem to provide. |
 
 Files prefixed with an underscore (`_release-please.yml`, `_sonarcloud.yml`) are this
@@ -126,6 +127,105 @@ are named explicitly, so the materialised pixi environment that activation leave
 checkout cannot be committed with them whatever your `.gitignore` covers. It is titled
 `deps: update pixi dependencies`; if your repository releases from Conventional Commits,
 that subject cuts a patch release.
+
+### docker-hub-publish
+
+Builds one container image per directory you name, fails the release on a HIGH or CRITICAL
+Trivy finding, publishes each image to Docker Hub with `regctl`, signs every published
+digest with `cosign`, and publishes each compose directory as an OCI compose artifact.
+
+Docker Hub supports no OIDC for personal accounts, so the credential is reached through
+AWS: the publishing job mints a GitHub OIDC token, assumes an IAM role with it, and reads
+a Docker Hub PAT out of SSM Parameter Store. **No Docker Hub password or PAT is ever
+stored as a GitHub secret.**
+
+[`docs/docker-hub-publish.md`](docs/docker-hub-publish.md) is the full reference: what a
+caller must provide, what fails a release, the AWS objects to create and the trust policy
+to put on the role.
+
+```yaml
+name: Publish
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# Declared HERE, not in the called workflow: GitHub cancels the caller when the two share
+# a group, and a release must never be cancelled partway through publishing.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  images:
+    uses: TomBorglum/workflows/.github/workflows/docker-hub-publish.yml@v1.1.0
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      image-directories: '["backend", "frontend"]'
+      compose-directories: '["stack"]'
+      aws-region: ${{ vars.AWS_REGION }}
+      aws-ssm-parameter: /my-project/release/dockerhub-pat
+      dockerhub-namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
+    secrets:
+      aws-role-arn: ${{ secrets.AWS_RELEASE_ROLE_ARN }}
+```
+
+**Pin an exact `@v1.2.3`, not `@v1`.** The IAM trust policy matches the called workflow's
+`job_workflow_ref`, and the recommended pattern admits only immutable exact versions, so a
+`@v1` pin cannot assume the role. This is the one workflow here where the moving tag is
+the wrong choice.
+
+#### Requirements
+
+Everything the publishing job touches in AWS has to exist first, and the role's trust
+policy is what denies every other repository. `docs/docker-hub-publish.md` walks it;
+in outline:
+
+- An **IAM role** whose trust policy matches *both* the calling repository's `sub` claim
+  and this workflow's `job_workflow_ref` claim. Either alone is insufficient — this
+  repository is public, so `job_workflow_ref` on its own would let anyone reach your role.
+- An **SSM SecureString** holding a Docker Hub PAT with Read & Write, and an inline policy
+  granting `ssm:GetParameter` on that one parameter ARN as a literal.
+- **`id-token: write`** on the calling job, as above.
+- Per image directory, a **`Dockerfile`** and a **`docker-bake.hcl` declaring
+  `target "image"`**.
+- Per compose directory, a **`compose.yaml` declaring `name: <repository>-<directory>`**,
+  with every variable it interpolates carrying a `:?` guard or a `:-` default. No `.env`
+  is required.
+- **No nested directories** in either list.
+
+#### Inputs
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `image-directories` | *(required)* | JSON array of directories built into images, one image each. Each holds a `Dockerfile` and a `docker-bake.hcl`. Publishes to `<namespace>/<repository>-<directory>`. |
+| `compose-directories` | `"[]"` | JSON array of directories published as OCI compose artifacts, one each, following the same name formula. Empty for a repository publishing images alone. |
+| `aws-region` | *(required)* | Region the role is assumed in and the PAT parameter is read from. |
+| `aws-ssm-parameter` | *(required)* | Absolute SSM path holding the Docker Hub PAT. Not a secret: a path is an address. |
+| `dockerhub-namespace` | *(required)* | Docker Hub namespace every image publishes under. Must be the account the PAT belongs to, which nothing checks. |
+| `trivyignores` | *(none)* | Comma-separated list of relative paths within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml` file. |
+
+#### Secrets
+
+| Secret | Description |
+| --- | --- |
+| `aws-role-arn` | The IAM role to assume, as a full ARN. A **secret** rather than an input so the account id inside it is masked — the runner echoes a step's `with:` block before the action runs. A bare role name is rejected. |
+
+The workflow declares **no outputs**. What crosses the boundary is what it publishes.
+
+#### What it does not do
+
+Publishing happens only on a `release` event — the job holding the credential carries
+`if: github.event_name == 'release'`. On a pull request the images are still built,
+scanned and gated and the compose files still validated, so a change that breaks the
+release is caught before the tag exists.
 
 ## Versioning and pinning
 

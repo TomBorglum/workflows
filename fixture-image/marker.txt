@@ -1,0 +1,1 @@
+Build fixture for _test-docker-hub-publish.yml. Not published anywhere.

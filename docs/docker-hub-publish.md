@@ -1,0 +1,267 @@
+# docker-hub-publish
+
+Reference for
+[`.github/workflows/docker-hub-publish.yml`](../.github/workflows/docker-hub-publish.yml):
+what a caller must provide, what fails a release, and the AWS and GitHub objects that live
+outside the repository. The workflow file documents its own jobs and steps.
+
+Placeholders throughout: `<owner>` and `<repository>` are the **calling** repository,
+`<directory>` one of the directories it hands over, `<namespace>` the Docker Hub account,
+`<account-id>` the 12-digit AWS account id, `<region>` the AWS region and `<project>` a
+name of the caller's choosing for its SSM paths.
+
+**Renaming this file or this repository breaks every caller's AWS trust policy**, which
+pins `job_workflow_ref` to its path. GitHub publishes no redirects for reusable workflows.
+
+## What a caller must provide
+
+| Requirement | Why |
+| --- | --- |
+| `id-token: write` on the calling job | The permissions ceiling is validated at run start, so a caller granting less fails with `startup_failure` and no job logs |
+| The triggers and the concurrency group | This workflow declares neither. See [Concurrency](#concurrency) |
+| A `Dockerfile` and a `docker-bake.hcl` declaring `target "image"` per image directory | `bake-target: image` and `targets: image` are fixed in this workflow |
+| A `compose.yaml` declaring `name: <repository>-<directory>` per compose directory | Gated. See [What fails a release](#what-fails-a-release) |
+| Non-nested directories | `compose` refuses a nested directory, and the build artifact is named `image-<directory>`, which cannot contain a slash |
+| A Docker Hub namespace matching the PAT's own account | Nothing checks it |
+| The AWS objects below | |
+
+No `.env` file is required beside a compose file, and no `.trivyignore` file is required
+anywhere.
+
+`push` runs on the `release` event alone. Every other event builds, scans and gates, and
+publishes nothing.
+
+Images are built for the runner's architecture. Publishing `linux/arm64` as well starts
+with the caller's own build being able to produce it.
+
+## What fails a release
+
+A **HIGH or CRITICAL** Trivy finding in any image.
+
+Suppressions go in the **`trivyignores`** input: a comma-separated list of relative paths
+within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml`
+file.
+
+Give every suppression an `expired_at` date. On that date Trivy stops honouring the entry
+and the finding fails the release again, so a suppression cannot outlive its reason by
+being forgotten. Removing the date instead of extending it turns the file into a permanent
+blind spot.
+
+A `compose.yaml` **not declaring `name: <repository>-<directory>`**. The formula is the
+images' own, so an operator reads the project, its network
+(`<repository>-<directory>_default`) and its volumes off the artifact's reference, and two
+repositories cannot collide on one host. The **declared** key is what is read, not
+`config`'s resolved `.name`, so setting `COMPOSE_PROJECT_NAME` does not satisfy this.
+
+A `compose.yaml` carrying a name with **neither a `:?` guard nor a `:-` default**. The
+compose file is published uninterpolated, so a deploy host resolves every name itself with
+no env file of any kind. A `:?` fails naming the variable, and a `:-` default renders
+deliberately and travels inside the artifact. A bare `${VAR}` renders an empty string and
+says nothing; `up` then reports `invalid reference format` without naming it. `${VAR:-}` is
+indistinguishable from bare and is refused with it.
+
+This workflow sets **`IMAGE_PREFIX`**, to `<namespace>/<repository>`, and **`IMAGE_TAG`**,
+to the tag being published, and names nothing else.
+
+## What is published
+
+Per image directory, `<namespace>/<repository>-<directory>` at the release tag, carrying an
+SBOM and a SLSA provenance attestation, plus a cosign signature.
+
+Per compose directory, `<namespace>/<repository>-<directory>` as an OCI compose artifact of
+two layers: the source `compose.yaml` **byte for byte**, every `${...}` intact, and an
+`image-digests.yaml` naming each service's image at its digest. `--with-env` is not passed,
+so no env file is published and no value from one reaches the artifact.
+
+Provenance runs at `mode=max`, which records the **whole GitHub event payload**, on a pull
+request including its body. It is published, so this is acceptable only while the
+**calling** repository is public. A private caller should weigh `mode=min` before adopting
+this workflow.
+
+## The AWS objects
+
+Created once, by hand. `<account-id>` never needs to appear in the calling repository: the
+ARN carrying it is a repository **secret**. Everything here sits inside AWS's
+**always-free** tier: IAM, STS, the OIDC provider, a standard-tier SSM parameter and the
+AWS-managed `aws/ssm` key.
+
+Docker Hub supports no OIDC for personal accounts, which is why AWS stands in at all: the
+job mints a GitHub OIDC token, exchanges it for temporary credentials on a role whose trust
+policy accepts only one caller running this workflow at a version tag, and reads a Docker
+Hub PAT out of SSM Parameter Store.
+
+1. **Docker Hub.** Create each repository explicitly, so visibility is set before the
+   first push. Then a personal access token with **Read & Write** and no Delete; a
+   personal-account token's scope is the account.
+
+2. **SSM parameter** `/<project>/release/dockerhub-pat`, SecureString, **standard tier**,
+   encrypted with the default `alias/aws/ssm`. Standard tier is the free one, and it
+   decrypts with the `kms:Decrypt` the policy below grants, where an advanced parameter
+   uses `kms:GenerateDataKey`.
+
+3. **IAM role** `gha-<repository>-release`, created as a Web identity role against the
+   existing `token.actions.githubusercontent.com` provider with audience
+   `sts.amazonaws.com` and nothing attached. Replace the trust policy the wizard generates
+   wholesale:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "GitHubActionsReleaseTagsOnly",
+         "Effect": "Allow",
+         "Principal": {
+           "Federated":
+             "arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com"
+         },
+         "Action": "sts:AssumeRoleWithWebIdentity",
+         "Condition": {
+           "StringEquals": {
+             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+           },
+           "StringLike": {
+             "token.actions.githubusercontent.com:sub":
+               "repo:<owner>@<owner-id>/<repository>@<repository-id>:ref:refs/tags/v*",
+             "token.actions.githubusercontent.com:job_workflow_ref":
+               "TomBorglum/workflows/.github/workflows/docker-hub-publish.yml@refs/tags/v*.*.*"
+           }
+         }
+       }
+     ]
+   }
+   ```
+
+   **`sub` describes the caller and `job_workflow_ref` the called workflow, and the pair is
+   the boundary.** `Principal.Federated` represents every repository on github.com, so the
+   `Condition` block is the entire security boundary. Either claim alone is insufficient:
+   `sub` on its own lets any workflow in the calling repository reach the role, and
+   `job_workflow_ref` on its own lets **any repository at all** reach it by calling this
+   public workflow.
+
+   **`v*.*.*` on `job_workflow_ref` is deliberate.** A `StringLike` `*` matches dots, so
+   two literal dots admit only the exact `vX.Y.Z` tags, which a ruleset in this repository
+   makes immutable. The moving `vX` and `vX.Y` tags carry at most one dot and cannot
+   match, so a caller cannot be re-pointed at new workflow content by someone moving a tag.
+   **Pin the caller to an exact `vX.Y.Z`**, never `@v1`.
+
+   The `sub` form above is the **immutable** one, carrying the owner and repository IDs.
+   Repositories created after 15 July 2026 use it by default, and older ones can opt in
+   under Settings → Actions → General. An older repository that has not opted in has
+   `sub` of `repo:<owner>/<repository>:ref:refs/tags/v*` instead. Read the real value out
+   of a claim dump rather than guessing which applies.
+
+   **The key is `job_workflow_ref`.** AWS maps only the claims its condition-key reference
+   lists, so a `StringLike` on a name outside that list leaves the one `Allow` statement
+   unmatched and STS answers `Not authorized to perform sts:AssumeRoleWithWebIdentity`,
+   naming no condition, with every other part correct. That is what `workflow_ref` as a key
+   name looks like. GitHub's own reusable-workflow page says trust conditions on
+   `job_workflow_ref` need a provider supporting custom claims and names only Google Cloud
+   and HashiCorp Vault; **that is out of date for AWS, which maps the key.** Do not
+   restructure a working policy on the strength of it.
+
+   **IAM Access Analyzer warns** that the `*` in `sub` "can allow requests from more
+   sources than you intended" and recommends naming a branch. The check fires on a
+   wildcard's presence; this one sits after the owner, the repository, the `ref:` claim
+   type, `refs/tags/` and the `v`, so all it admits is which version number. Save through
+   it.
+
+   Then one inline policy:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "ReadDockerHubPat",
+         "Effect": "Allow",
+         "Action": "ssm:GetParameter",
+         "Resource":
+           "arn:aws:ssm:<region>:<account-id>:parameter/<project>/release/dockerhub-pat"
+       },
+       {
+         "Sid": "DecryptViaSsmOnly",
+         "Effect": "Allow",
+         "Action": "kms:Decrypt",
+         "Resource": "arn:aws:kms:<region>:<account-id>:key/<aws/ssm key id>",
+         "Condition": {
+           "StringEquals": { "kms:ViaService": "ssm.<region>.amazonaws.com" }
+         }
+       }
+     ]
+   }
+   ```
+
+   **With a shared key the isolation boundary is that parameter ARN alone.** `aws/ssm`
+   grants `kms:Decrypt` to any caller in the account authorised for SSM, so the literal
+   parameter path above, rather than a prefix, is what holds this role away from every
+   other parameter under the same key.
+
+4. **One secret and two values** in the calling repository.
+
+   - **Secret** holding `arn:aws:iam::<account-id>:role/gha-<repository>-release`, passed
+     as the `aws-role-arn` secret. The role ARN is a secret at both ends because the runner
+     echoes a step's `with:` block before the action runs. A fork's pull request gets no
+     secrets, and `push` runs on the release event alone.
+   - The Docker Hub namespace, passed as `dockerhub-namespace`.
+   - The region, passed as `aws-region`.
+
+   The SSM path is neither: the caller passes it as the `aws-ssm-parameter` input. It is
+   not a secret — a path is an address, and the value it points at never leaves the step
+   that reads it.
+
+## Restricting who can create tags
+
+Trust is pinned to this workflow at a version tag, and a workflow file is repository
+content. Anyone able to create a matching tag in **either** repository can change what the
+role trusts: a tag in the caller satisfies `sub`, and a tag in this repository carrying an
+altered workflow satisfies `job_workflow_ref`.
+
+Branch protection does not close this. A ruleset on the default branch gates what reaches
+`main`; it says nothing about what a tag points at. Close it in both repositories with a
+**tag** ruleset carrying **Restrict creations**, **Restrict deletions** and **Block force
+pushes**, and only the release automation as a bypass actor.
+
+Where tags are major-aliased — this repository force-moves `vX` and `vX.Y` after each
+release — the ruleset has to cover `refs/tags/v*` rather than `refs/tags/v*.*.*`, and the
+automation needs the bypass or its own tag step fails.
+
+Verify rather than assume, for each repository:
+
+```sh
+gh api repos/<owner>/<repository>/rulesets --jq '.[] | {name, target}'
+gh api repos/<owner>/<repository>/rulesets/<id> \
+  --jq '{conditions, rules: [.rules[].type], bypass_actors}'
+```
+
+A tag ruleset whose rules are `deletion` and `non_fast_forward` alone makes existing tags
+immutable and still lets anyone with write access create a new one.
+
+## Concurrency
+
+Declare the concurrency group in the **caller**. GitHub cancels the caller when caller and
+called share a group, and a run stopped partway through `push` can leave one image
+published and another not. Condition `cancel-in-progress` on the event: **a release run
+must never be cancelled**, where a superseded pull request run should be.
+
+## Verifying a release
+
+```sh
+docker buildx imagetools inspect <namespace>/<repository>-<directory>:<version>
+cosign verify <namespace>/<repository>-<directory>@sha256:<digest> \
+  --certificate-identity-regexp '.*<repository>.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker compose -f oci://docker.io/<namespace>/<repository>-<directory>:<version> config
+```
+
+`cosign-installer`'s default is cosign 3, which attaches the signature as an **OCI 1.1
+referrer** rather than a `sha256-<digest>.sig` tag, so a tag listing shows the published
+tags and nothing more.
+
+**If the exchange is refused**, read the decoded OIDC claims the `push` job dumps before
+its first AWS call, correct the trust policy in the console and re-run the failed job: the
+AWS side lives outside the tag, so that loop is free.
+
+**If the workflow file itself is wrong**, a `release` event runs the caller as it exists on
+the tag, so the fix is a patch release of the caller — or, for a bug in this workflow, a
+patch release here and a bumped pin.
