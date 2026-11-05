@@ -105,9 +105,10 @@ jobs:
           git config user.name  "$NAME"
           git config user.email "$EMAIL"
 
-          # Only vX and vX.Y move. The exact vX.Y.Z release-please just created is
-          # immutable, and the version-tags ruleset enforces that: its `v*.*.*`
-          # pattern needs two literal dots, which neither tag below has.
+          # Only vX and vX.Y move. The exact vX.Y.Z release-please just created is never
+          # touched again. The version-tags ruleset covers all of `v*` - creation,
+          # deletion and force pushes - so the force-push below works because this App is
+          # its only bypass actor, not because these tags fall outside it.
           for tag in "v${MAJOR}" "v${MAJOR}.${MINOR}"; do
             git tag -f -a "$tag" -m "Release $tag" "$SHA"
             git push --force origin "refs/tags/$tag"

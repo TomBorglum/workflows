@@ -34,6 +34,42 @@ publishes nothing.
 Images are built for the runner's architecture. Publishing `linux/arm64` as well starts
 with the caller's own build being able to produce it.
 
+## The image metadata contract
+
+`docker/metadata-action` derives the tags, labels and annotations **once** for every
+image. `docker/bake-action` then builds each directory with the derived values layered
+**under** the directory's own `docker-bake.hcl`, which is passed last and so wins every
+key it names.
+
+What the caller's bake file owns:
+
+- **`target "image"`, carrying no `tags`.** The build exports an OCI archive and the
+  publishing job names the images from the derived tags.
+- **`labels`**, a map that merges per key: a key declared here replaces the derived value,
+  and every key it does not name survives.
+- **`annotations`**, a list that is appended to rather than replaced.
+- **`context` and `dockerfile`.** The directory is passed as bake's `source`, so both
+  resolve the way a plain `docker build` resolves them: `context` against the directory,
+  `dockerfile` against the context. A `context` above the directory builds and needs
+  nothing from the caller.
+
+The derived metadata is the `org.opencontainers.image.*` set, carried as both labels and
+manifest annotations. **`title` and `description` are the two worth declaring per image**,
+because the derived values describe the repository and are therefore identical for every
+image in it.
+
+Four tags are published per image, and per compose artifact, derived from the release tag:
+
+| Tag | Example |
+| --- | --- |
+| `{{version}}` | `1.2.3` |
+| `{{major}}.{{minor}}` | `1.2` |
+| `sha-<full commit>` | `sha-a1b2c3d4...` |
+| `latest` | `latest` |
+
+`latest=false` is set on the derivation, so `latest` is declared like any other pattern
+rather than implied by a semver tag, and it is applied on the `release` event alone.
+
 ## What fails a release
 
 A **HIGH or CRITICAL** Trivy finding in any image.
@@ -147,7 +183,7 @@ Hub PAT out of SSM Parameter Store.
 
    The `sub` form above is the **immutable** one, carrying the owner and repository IDs.
    Repositories created after 15 July 2026 use it by default, and older ones can opt in
-   under Settings → Actions → General. An older repository that has not opted in has
+   under Settings → Actions → OIDC. An older repository that has not opted in has
    `sub` of `repo:<owner>/<repository>:ref:refs/tags/v*` instead. Read the real value out
    of a claim dump rather than guessing which applies.
 
@@ -160,11 +196,22 @@ Hub PAT out of SSM Parameter Store.
    and HashiCorp Vault; **that is out of date for AWS, which maps the key.** Do not
    restructure a working policy on the strength of it.
 
-   **IAM Access Analyzer warns** that the `*` in `sub` "can allow requests from more
-   sources than you intended" and recommends naming a branch. The check fires on a
-   wildcard's presence; this one sits after the owner, the repository, the `ref:` claim
-   type, `refs/tags/` and the `v`, so all it admits is which version number. Save through
-   it.
+   **IAM Access Analyzer raises two security warnings** on this policy. Both are
+   advisory and Save stays enabled.
+
+   The `*` in `sub` "can allow requests from more sources than you intended", with a
+   recommendation to name a branch. The check fires on a wildcard's presence; this one
+   sits after the owner, the repository, the `ref:` claim type, `refs/tags/` and the `v`,
+   so all it admits is which version number.
+
+   `Overly permissive use of wildcard for the
+   token.actions.githubusercontent.com:job_workflow_ref condition key. Use the wildcard
+   preceded by 6 consecutive characters.` The second and third `*` in `v*.*.*` are each
+   preceded by one literal `.`. The check counts literal characters and does not model the
+   claim: the two dots are the control, and loosening to `v1.*` would pass it while
+   admitting the force-moved `v1.1`.
+
+   Save through both.
 
    Then one inline policy:
 

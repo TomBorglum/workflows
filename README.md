@@ -240,9 +240,15 @@ produces three tags:
 | `@v1.2.3` | never | you need a reproducible build |
 | `@<sha>` | never | you pin everything by SHA as policy |
 
+`docker-hub-publish` is the exception to that table: pin it to an exact `@v1.2.3`,
+because the AWS trust policy its callers need admits only immutable version tags. See
+[its section](#docker-hub-publish).
+
 `v1` and `v1.2` are deliberately mutable — that is how a fix reaches you without
-your intervention. Exact versions are immutable and enforced as such by a repository
-ruleset, so `@v1.2.3` and `@<sha>` are equally safe pins.
+your intervention. A tag ruleset covers every `v*` tag, restricting creation, deletion
+and force pushes with the release automation as its only bypass actor, so a moving tag
+moves only when a release moves it and an exact version never moves at all. `@v1.2.3`
+and `@<sha>` are equally safe pins.
 
 A major bump means `v1` stops moving. You stay on 1.x until you change the pin to
 `@v2`, so a breaking change can never arrive unannounced.
