@@ -175,14 +175,14 @@ jobs:
       # Provides pixi. The version is the caller's, declared in their .envrc as
       # `use pixi <version>`; this workflow neither pins one nor accepts one.
       - name: Install pixi from the workspace's .envrc
-        uses: TomBorglum/actions/direnv/setup@8bb5c662cb67237681564ec96cbb7ed84bc4aed8 # v3.0.0
+        uses: TomBorglum/actions/direnv/setup@f3028cddd68f2efc77b63a3f4fd749e541c8701c # v3.1.0
         with:
           working-directory: ${{ inputs.working-directory }}
           stub-directives: ${{ inputs.stub-directives }}
 
       - name: Upgrade pixi dependencies
         id: upgrade
-        uses: TomBorglum/actions/pixi/upgrade-dependencies@8bb5c662cb67237681564ec96cbb7ed84bc4aed8 # v3.0.0
+        uses: TomBorglum/actions/pixi/upgrade-dependencies@f3028cddd68f2efc77b63a3f4fd749e541c8701c # v3.1.0
         with:
           working-directory: ${{ inputs.working-directory }}
           pinning-strategy: ${{ inputs.pinning-strategy }}
