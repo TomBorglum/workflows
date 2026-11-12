@@ -150,7 +150,7 @@ jobs:
           IMAGE_DIRECTORIES: ${{ inputs.image-directories }}
           COMPOSE_DIRECTORIES: ${{ inputs.compose-directories }}
           REPOSITORY: ${{ github.event.repository.name }}
-          SCAN_GATE: ${{ inputs.vulnerability-gate }}
+          VULNERABILITY_GATE: ${{ inputs.vulnerability-gate }}
         run: |
           set -euo pipefail
           # `required` is satisfied by a key being present, and an unset variable reaches
@@ -161,8 +161,8 @@ jobs:
           fi
           # Checked HERE rather than where it is read, so a typo fails before any image is
           # built: an unrecognised value silently gating nothing is the whole risk.
-          if [ "$SCAN_GATE" != 'always' ] && [ "$SCAN_GATE" != 'release' ]; then
-            echo "::error::vulnerability-gate must be 'always' or 'release', got: '$SCAN_GATE'"
+          if [ "$VULNERABILITY_GATE" != 'always' ] && [ "$VULNERABILITY_GATE" != 'release' ]; then
+            echo "::error::vulnerability-gate must be 'always' or 'release', got: '$VULNERABILITY_GATE'"
             exit 1
           fi
           printf '%s' "$IMAGE_DIRECTORIES" > /tmp/image-directories.json
@@ -346,7 +346,7 @@ jobs:
       - name: Gate on the scan
         env:
           DIRECTORY: ${{ matrix.directory }}
-          SCAN_GATE: ${{ inputs.vulnerability-gate }}
+          VULNERABILITY_GATE: ${{ inputs.vulnerability-gate }}
           EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
@@ -371,7 +371,7 @@ jobs:
           if [ -n "$findings" ]; then
             printf '%s\n' "$findings"
             count="$(printf '%s\n' "$findings" | wc -l)"
-            if [ "$SCAN_GATE" = 'release' ] && [ "$EVENT" = 'pull_request' ]; then
+            if [ "$VULNERABILITY_GATE" = 'release' ] && [ "$EVENT" = 'pull_request' ]; then
               {
                 printf '### %s image: %s HIGH or CRITICAL finding(s)\n\n' "$DIRECTORY" "$count"
                 printf 'Advisory on a pull request. The release gate blocks on these.\n\n'
