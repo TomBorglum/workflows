@@ -83,24 +83,22 @@ on:
         type: string
       vulnerability-gate:
         description: >-
-          Which caller events a HIGH or CRITICAL finding fails. `always`, the default,
-          fails every event, as this workflow did before the input existed. `release`
-          fails a release. On a pull_request it writes the findings to the job summary and
-          passes. Validated in the `images` step, so an unrecognised value fails before
-          any image is built. This input moves the vulnerability check alone. The separate
-          check that trivy scanned this image, and not something else, is never relaxed.
-          docs/docker-hub-publish.md says when to pass `release`.
+          Which caller events a HIGH or CRITICAL finding fails. `always` fails every
+          event. `release` fails a release, and on a pull_request writes the findings to
+          the job summary and passes. An unrecognised value fails the `images` step,
+          before any image is built. This input moves the vulnerability check alone: the
+          check that trivy scanned this image, and not something else, fails under either
+          value. docs/docker-hub-publish.md says when to pass `release`.
         required: false
         default: always
         type: string
       vex-documents:
         description: >-
           Comma-separated list of relative paths within the repository to OpenVEX
-          documents, reaching trivy as --vex. Spelled like `trivyignores` above, and
-          applied to every image scan. A `not_affected` or `fixed` statement suppresses
-          its finding. An `affected` or `under_investigation` one does not, so a reachable
-          finding recorded here still reaches the gate. Empty by default, which applies no
-          VEX at all.
+          documents, reaching trivy as --vex. Applied to every image scan. A
+          `not_affected` or `fixed` statement suppresses its finding. An `affected` or
+          `under_investigation` one does not, so a reachable finding recorded here still
+          reaches the gate.
         required: false
         default: ''
         type: string
@@ -313,10 +311,10 @@ jobs:
           mkdir -p /tmp/oci
           tar -xf /tmp/image.oci.tar -C /tmp/oci
 
-      # SET ONLY WHEN THE CALLER NAMED ONE, which is why this is a step and not another
-      # `env:` key below. TRIVY_VEX is a string LIST, so an empty value does not read as
-      # "no sources" - it reads as one source whose path is the empty string, and trivy
-      # fails opening it. The action exposes no VEX input, hence the variable.
+      # TRIVY_VEX IS A STRING LIST, so an empty value does not read as "no sources" - it
+      # reads as one source whose path is the empty string, and trivy fails opening it.
+      # Hence a guarded step rather than an `env:` key on the scan below, which the action
+      # exposes no VEX input for.
       - name: Select the VEX sources
         if: inputs.vex-documents != ''
         env:
@@ -343,9 +341,8 @@ jobs:
       # cannot walk, trivy resolves the empty config `{}`, reports nothing and exits 0 -
       # and `{}` declares no platform, which is what the wrong-image check catches.
       #
-      # ONLY THE SECOND IS CONDITIONAL. `vulnerability-gate` can relax the vulnerability check. It
-      # can never relax the wrong-image check, because a scan of the wrong thing reports
-      # no findings and would otherwise read as a clean image.
+      # `vulnerability-gate` relaxes the vulnerability check only. Relaxing the
+      # wrong-image check would let a scan of the wrong thing read as a clean image.
       - name: Gate on the scan
         env:
           DIRECTORY: ${{ matrix.directory }}
@@ -374,9 +371,6 @@ jobs:
           if [ -n "$findings" ]; then
             printf '%s\n' "$findings"
             count="$(printf '%s\n' "$findings" | wc -l)"
-            # The ONE branch `vulnerability-gate: release` buys. The log line above is printed
-            # either way, so a run reports the same findings whether or not it blocks on
-            # them; the summary is what survives into a reader's pull request view.
             if [ "$SCAN_GATE" = 'release' ] && [ "$EVENT" = 'pull_request' ]; then
               {
                 printf '### %s image: %s HIGH or CRITICAL finding(s)\n\n' "$DIRECTORY" "$count"

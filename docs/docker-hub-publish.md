@@ -94,8 +94,8 @@ being forgotten. Removing the date instead of extending it turns the file into a
 blind spot.
 
 A finding that is unreachable in the image belongs in the **`vex-documents`** input
-instead: a comma-separated list of relative paths to OpenVEX documents, spelled like
-`trivyignores` and applied to every image scan the same way. A `not_affected` or `fixed`
+instead: a comma-separated list of relative paths to OpenVEX documents, applied to every
+image scan. A `not_affected` or `fixed`
 statement suppresses its finding; an `affected` or `under_investigation` one does not,
 so recording a reachable finding there does not hide it from the gate. The split is by
 what expires. Unreachability is a property of the image and does not rot, so a VEX
@@ -110,9 +110,8 @@ reports nothing and exits 0, so a broken scan and a clean image look identical. 
 **vulnerability check** is the HIGH or CRITICAL findings themselves.
 
 The **`vulnerability-gate`** input moves the vulnerability check and nothing else.
-`always`, the default, fails every caller event, which is what every release before the
-input existed did. `release` fails a release and, on a `pull_request`, writes the
-findings to the job summary and passes.
+`always` fails every caller event. `release` fails a release and, on a `pull_request`,
+writes the findings to the job summary and passes.
 
 `release` is for a repository that will not have a pull request blocked by drift in a base
 image its author does not control: a base whose packages have a published fix the upstream
@@ -123,8 +122,7 @@ publish is where the decision actually gets made, so that is where the block bel
 **The wrong-image check is never relaxed**, under either value. Relaxing it would let a
 broken scan read as a clean image.
 
-Both values print the findings to the step log. `release` adds the job summary table,
-which is what survives into a reader's pull request view.
+Both values print the findings to the step log. `release` adds the job summary table.
 
 Not covered by this repository's caller test: the advisory branch needs an image carrying
 HIGH or CRITICAL findings, and `_test-docker-hub-publish.yml` builds `fixture-image` from
