@@ -262,8 +262,10 @@ jobs:
             | sed 's/^/compose-directories=/' >> "$GITHUB_OUTPUT"
 
           # Each image's own paths, prefixed with its directory because that is what they
-          # resolve against, and comma-joined because that is what trivy-action and TRIVY_VEX
-          # take. One output per config key, carrying that key's name.
+          # resolve against, then joined into the one comma-separated string that
+          # trivy-action's `trivyignores` input and TRIVY_VEX each take. The config file
+          # declares a list and refuses a comma inside an element, so the join happens here
+          # and nowhere else. One output per config key, carrying that key's name.
           for key in trivyignores vex-documents; do
             jq -c --arg k "$key" '
               .images.directories
