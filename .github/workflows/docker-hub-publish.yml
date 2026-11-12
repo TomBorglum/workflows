@@ -29,55 +29,39 @@ on:
     inputs:
       config:
         description: >-
-          Path to the YAML file declaring what this repository publishes, relative to the
-          repository root. `images.directories` is a mapping keyed by directory, one key per
-          image, each directory holding a Dockerfile and a docker-bake.hcl. An image publishes
-          to <namespace>/<repository>-<directory>. An image's `trivyignores` and `vex-documents`
-          are lists of one file per element, resolved against that image's own directory; an
-          absolute path or one containing `..` is refused. `images.gates.vulnerability` is
-          `always`, the default, or `release`, which fails a release and reports to the job
-          summary on a pull_request; it moves the vulnerability check alone, and the check that
-          trivy scanned this image fails under either value. `compose-projects` is a mapping
-          keyed the same way for directories published as OCI compose artifacts, and is omitted
-          by a repository that publishes images alone. A compose file's `name:` must equal
-          <repository>-<directory>, no directory in either collection may be nested, and every
-          variable such a file interpolates other than IMAGE_PREFIX and IMAGE_TAG must carry a
-          `:?` guard or a `:-` default, because the file is published uninterpolated and a bare
-          ${...} renders empty on a deploy host. No .env is required. README.md documents every
-          key and docs/docker-hub-publish.md says when to pass `release`.
+          Path to the YAML file declaring the images and compose projects this repository
+          publishes, relative to the repository root. README.md documents every key.
         required: false
         default: .github/docker-hub-publish.yml
         type: string
       aws-region:
         description: >-
           The region the release role is assumed in and the Docker Hub PAT parameter is
-          read from. Spelled as the `aws/assume-role` input it feeds, in `push`.
+          read from.
         required: true
         type: string
       aws-ssm-parameter:
         description: >-
-          The SSM Parameter Store path holding the Docker Hub PAT `push` logs in with: a
-          SecureString, read with --with-decryption. The release role's inline policy grants
-          ssm:GetParameter on this one parameter's ARN as a literal rather than a prefix, so a
-          path it does not name is refused - docs/docker-hub-publish.md covers that boundary.
-          Not a secret: the value it points at never leaves the step that reads it.
+          The SSM Parameter Store path holding the Docker Hub PAT, read with
+          --with-decryption. Must be a SecureString, and must be the literal ARN the release
+          role's inline policy names: the policy grants ssm:GetParameter on one parameter
+          rather than a prefix, so any other path is refused. Not a secret: the value it
+          points at never leaves the step that reads it.
         required: true
         type: string
       dockerhub-namespace:
         description: >-
           The Docker Hub namespace every image publishes under, and the account `push`
           logs in as. Must be the account the PAT above belongs to, which nothing checks.
-          Validated in the `images` step, which is also where it becomes half of each
-          repository name.
         required: true
         type: string
     secrets:
       aws-role-arn:
         description: >-
           The IAM role `push` assumes with this workflow's OIDC token, as a full ARN. Its
-          trust policy has to accept this workflow's job_workflow_ref claim and its inline
-          policy has to grant ssm:GetParameter on the parameter above. A secret rather than
-          an input so the account id inside it is masked - see the credential step.
+          trust policy must accept this workflow's job_workflow_ref claim and its inline
+          policy must grant ssm:GetParameter on the parameter above. A secret rather than an
+          input so the account id inside it is masked.
         required: true
 
 permissions:
