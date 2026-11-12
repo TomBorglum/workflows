@@ -33,6 +33,16 @@ name: docker-hub-publish test
 #
 # `trivyignores` is left unset, asserting that a caller suppressing nothing needs no file.
 #
+# `vulnerability-gate` and `vex-documents` are left unset too, asserting their defaults.
+#
+# The `release` branch of `vulnerability-gate` is NOT covered here, and cannot be. It
+# needs an image carrying HIGH or CRITICAL findings, while fixture-image is FROM scratch
+# precisely so this repository's required check cannot fail on a CVE published against a
+# base. A second call job with a vulnerable fixture does not work either: the `compose`
+# job uploads the fixed literal name `compose-files`, so two calls in one run collide on
+# that artifact. The branch is verified in the consuming repository -
+# docs/docker-hub-publish.md records it.
+#
 # Deliberately NOT path-filtered. When a filter excludes a pull request the checks stay
 # Pending rather than passing, so a required check over a filtered workflow deadlocks the
 # pull request permanently.
