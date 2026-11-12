@@ -102,11 +102,17 @@ Unreachability is a property of the image and does not rot, so a VEX statement c
 justification and no date; a finding merely waiting for a fix keeps a dated
 `.trivyignore` entry.
 
-## Which events the findings assertion fails
+## Which events a HIGH or CRITICAL finding fails
 
-The **`scan-gate`** input decides. `always`, the default, fails every caller event, which
-is what every release before the input existed did. `release` fails a release and, on a
-`pull_request`, writes the findings to the job summary and passes.
+The scan produces two independent checks. The **wrong-image check** proves trivy scanned
+this image: pointed at a layout it cannot walk, trivy resolves the empty config `{}`,
+reports nothing and exits 0, so a broken scan and a clean image look identical. The
+**vulnerability check** is the HIGH or CRITICAL findings themselves.
+
+The **`scan-gate`** input moves the vulnerability check and nothing else. `always`, the
+default, fails every caller event, which is what every release before the input existed
+did. `release` fails a release and, on a `pull_request`, writes the findings to the job
+summary and passes.
 
 `release` is for a repository that will not have a pull request blocked by drift in a base
 image its author does not control: a base whose packages have a published fix the upstream
@@ -114,9 +120,8 @@ image has not been rebuilt with produces findings on every pull request, includi
 that change nothing near an image, and the contributor cannot act on any of them. The
 publish is where the decision actually gets made, so that is where the block belongs.
 
-**The identity assertion is never softened**, under either value. A scan pointed at
-something other than the image reports no findings and exits 0, so softening it would
-read as a clean image rather than as a broken scan.
+**The wrong-image check is never relaxed**, under either value. Relaxing it would let a
+broken scan read as a clean image.
 
 Both values print the findings to the step log. `release` adds the job summary table,
 which is what survives into a reader's pull request view.
