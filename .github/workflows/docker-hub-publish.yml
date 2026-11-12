@@ -311,15 +311,17 @@ jobs:
           mkdir -p /tmp/oci
           tar -xf /tmp/image.oci.tar -C /tmp/oci
 
-      # TRIVY_VEX IS A STRING LIST, so an empty value does not read as "no sources" - it
-      # reads as one source whose path is the empty string, and trivy fails opening it.
-      # Hence a guarded step rather than an `env:` key on the scan below, which the action
-      # exposes no VEX input for.
+      # TRIVY_VEX is trivy's own name for `--vex`, as TRIVY_SKIP_VERSION_CHECK below is
+      # for `--skip-version-check`; the action exposes an input for neither.
+      #
+      # IT IS A STRING LIST, so an empty value does not read as "no sources" - it reads as
+      # one source whose path is the empty string, and trivy fails opening it. Hence a
+      # guarded step rather than an `env:` key on the scan below.
       - name: Select the VEX sources
         if: inputs.vex-documents != ''
         env:
-          VEX: ${{ inputs.vex-documents }}
-        run: printf 'TRIVY_VEX=%s\n' "$VEX" >> "$GITHUB_ENV"
+          VEX_DOCUMENTS: ${{ inputs.vex-documents }}
+        run: printf 'TRIVY_VEX=%s\n' "$VEX_DOCUMENTS" >> "$GITHUB_ENV"
 
       - name: Scan the ${{ matrix.directory }} image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
