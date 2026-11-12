@@ -81,6 +81,30 @@ on:
         required: false
         default: ''
         type: string
+      scan-gate:
+        description: >-
+          WHEN THE FINDINGS ASSERTION BLOCKS. `always`, the default, fails every caller
+          event, which is what every release before this input existed did. `release`
+          fails a release and, on a pull_request, writes the findings to the job summary
+          and passes instead - for a repository that will not have a pull request blocked
+          by drift in a base image its author does not control, the publish being where
+          the decision actually gets made. Validated in the `images` step. THE IDENTITY
+          ASSERTION IS NEVER SOFTENED by either value: it catches trivy scanning something
+          other than the image, which is a bug and not a finding.
+        required: false
+        default: always
+        type: string
+      vex:
+        description: >-
+          Comma-separated list of relative paths within the repository to OpenVEX
+          documents, reaching trivy as --vex. Spelled like `trivyignores` above and
+          applied to every image scan the same way. A `not_affected` or `fixed` statement
+          suppresses its finding and an `affected` or `under_investigation` one does not,
+          so recording a reachable finding here does not hide it from the gate. Empty by
+          default, which applies no VEX at all.
+        required: false
+        default: ''
+        type: string
     secrets:
       aws-role-arn:
         description: >-
@@ -129,12 +153,19 @@ jobs:
           IMAGE_DIRECTORIES: ${{ inputs.image-directories }}
           COMPOSE_DIRECTORIES: ${{ inputs.compose-directories }}
           REPOSITORY: ${{ github.event.repository.name }}
+          SCAN_GATE: ${{ inputs.scan-gate }}
         run: |
           set -euo pipefail
           # `required` is satisfied by a key being present, and an unset variable reaches
           # a called workflow as an empty string.
           if [[ ! "$DOCKERHUB_NAMESPACE" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
             echo "::error::dockerhub-namespace must be lowercase letters, digits, - or _, got: '$DOCKERHUB_NAMESPACE'"
+            exit 1
+          fi
+          # Checked HERE rather than where it is read, so a typo fails before any image is
+          # built: an unrecognised value silently gating nothing is the whole risk.
+          if [ "$SCAN_GATE" != 'always' ] && [ "$SCAN_GATE" != 'release' ]; then
+            echo "::error::scan-gate must be 'always' or 'release', got: '$SCAN_GATE'"
             exit 1
           fi
           printf '%s' "$IMAGE_DIRECTORIES" > /tmp/image-directories.json
@@ -283,6 +314,16 @@ jobs:
           mkdir -p /tmp/oci
           tar -xf /tmp/image.oci.tar -C /tmp/oci
 
+      # SET ONLY WHEN THE CALLER NAMED ONE, which is why this is a step and not another
+      # `env:` key below. TRIVY_VEX is a string LIST, so an empty value does not read as
+      # "no sources" - it reads as one source whose path is the empty string, and trivy
+      # fails opening it. The action exposes no `vex` input, hence the variable.
+      - name: Select the VEX sources
+        if: inputs.vex != ''
+        env:
+          VEX: ${{ inputs.vex }}
+        run: printf 'TRIVY_VEX=%s\n' "$VEX" >> "$GITHUB_ENV"
+
       - name: Scan the ${{ matrix.directory }} image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
@@ -302,9 +343,15 @@ jobs:
       # identity first, then the findings. Pointed at a layout it cannot walk, trivy
       # resolves the empty config `{}`, reports nothing and exits 0 - and `{}` declares no
       # platform, which is what the identity assertion catches.
+      #
+      # ONLY THE SECOND IS CONDITIONAL. `scan-gate` can soften the findings assertion; it
+      # can never soften the identity one, because a scan of the wrong thing reports no
+      # findings and would otherwise read as a clean image.
       - name: Gate on the scan
         env:
           DIRECTORY: ${{ matrix.directory }}
+          SCAN_GATE: ${{ inputs.scan-gate }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -327,7 +374,21 @@ jobs:
                              | "\(.Severity)\t\(.VulnerabilityID)\t\(.PkgName) \(.InstalledVersion) -> \(.FixedVersion // "no fix")"' /tmp/trivy.json)"
           if [ -n "$findings" ]; then
             printf '%s\n' "$findings"
-            echo "::error::$(printf '%s\n' "$findings" | wc -l) HIGH or CRITICAL finding(s) in the $DIRECTORY image."
+            count="$(printf '%s\n' "$findings" | wc -l)"
+            # The ONE branch `scan-gate: release` buys. The log line above is printed
+            # either way, so a run reports the same findings whether or not it blocks on
+            # them; the summary is what survives into a reader's pull request view.
+            if [ "$SCAN_GATE" = 'release' ] && [ "$EVENT" = 'pull_request' ]; then
+              {
+                printf '### %s image: %s HIGH or CRITICAL finding(s)\n\n' "$DIRECTORY" "$count"
+                printf 'Advisory on a pull request. The release gate blocks on these.\n\n'
+                printf '| Severity | ID | Package |\n| --- | --- | --- |\n'
+                printf '%s\n' "$findings" | awk -F'\t' '{printf "| %s | %s | %s |\n", $1, $2, $3}'
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning::$count HIGH or CRITICAL finding(s) in the $DIRECTORY image, advisory on a pull request."
+              exit 0
+            fi
+            echo "::error::$count HIGH or CRITICAL finding(s) in the $DIRECTORY image."
             exit 1
           fi
           echo "no HIGH or CRITICAL findings"

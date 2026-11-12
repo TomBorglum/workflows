@@ -33,6 +33,18 @@ name: docker-hub-publish test
 #
 # `trivyignores` is left unset, asserting that a caller suppressing nothing needs no file.
 #
+# `scan-gate` AND `vex` ARE LEFT UNSET TOO, AND THAT IS THE ASSERTION: the defaults are
+# `always` and empty, so this call gates exactly as every release before those inputs
+# existed did, and the step setting TRIVY_VEX is skipped. A caller passing neither cannot
+# be affected by them.
+#
+# The `release` branch of `scan-gate` is NOT covered here, and cannot be. It needs an image
+# carrying HIGH or CRITICAL findings, while fixture-image is FROM scratch precisely so this
+# repository's required check cannot fail on a CVE published against a base. A second call
+# job with a vulnerable fixture does not work either: the `compose` job uploads the fixed
+# literal name `compose-files`, so two calls in one run collide on that artifact. The
+# branch is verified in the consuming repository - docs/docker-hub-publish.md records it.
+#
 # Deliberately NOT path-filtered. When a filter excludes a pull request the checks stay
 # Pending rather than passing, so a required check over a filtered workflow deadlocks the
 # pull request permanently.
