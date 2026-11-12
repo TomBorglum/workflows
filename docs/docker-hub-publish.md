@@ -93,6 +93,46 @@ and the finding fails the release again, so a suppression cannot outlive its rea
 being forgotten. Removing the date instead of extending it turns the file into a permanent
 blind spot.
 
+A finding that is unreachable in the image belongs in the **`vex-documents`** input
+instead: a comma-separated list of relative paths to OpenVEX documents, spelled like
+`trivyignores` and applied to every image scan the same way. A `not_affected` or `fixed`
+statement suppresses its finding; an `affected` or `under_investigation` one does not,
+so recording a reachable finding there does not hide it from the gate. The split is by
+what expires. Unreachability is a property of the image and does not rot, so a VEX
+statement carries a justification and no date; a finding merely waiting for a fix keeps
+a dated `.trivyignore` entry.
+
+## Which events a HIGH or CRITICAL finding fails
+
+The scan produces two independent checks. The **wrong-image check** proves trivy scanned
+this image: pointed at a layout it cannot walk, trivy resolves the empty config `{}`,
+reports nothing and exits 0, so a broken scan and a clean image look identical. The
+**vulnerability check** is the HIGH or CRITICAL findings themselves.
+
+The **`vulnerability-gate`** input moves the vulnerability check and nothing else.
+`always`, the default, fails every caller event, which is what every release before the
+input existed did. `release` fails a release and, on a `pull_request`, writes the
+findings to the job summary and passes.
+
+`release` is for a repository that will not have a pull request blocked by drift in a base
+image its author does not control: a base whose packages have a published fix the upstream
+image has not been rebuilt with produces findings on every pull request, including ones
+that change nothing near an image, and the contributor cannot act on any of them. The
+publish is where the decision actually gets made, so that is where the block belongs.
+
+**The wrong-image check is never relaxed**, under either value. Relaxing it would let a
+broken scan read as a clean image.
+
+Both values print the findings to the step log. `release` adds the job summary table,
+which is what survives into a reader's pull request view.
+
+Not covered by this repository's caller test: the advisory branch needs an image carrying
+HIGH or CRITICAL findings, and `_test-docker-hub-publish.yml` builds `fixture-image` from
+`scratch` precisely so the required check cannot fail on a CVE published against a base.
+A second call job is not the way round it either, because the `compose` job's artifact
+name is the fixed literal `compose-files` and two calls in one run collide on it. The
+branch is verified in the consuming repository.
+
 A `compose.yaml` **not declaring `name: <repository>-<directory>`**. The formula is the
 images' own, so an operator reads the project, its network
 (`<repository>-<directory>_default`) and its volumes off the artifact's reference, and two
