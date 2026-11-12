@@ -81,7 +81,7 @@ on:
         required: false
         default: ''
         type: string
-      scan-gate:
+      vulnerability-gate:
         description: >-
           Which caller events a HIGH or CRITICAL finding fails. `always`, the default,
           fails every event, as this workflow did before the input existed. `release`
@@ -93,7 +93,7 @@ on:
         required: false
         default: always
         type: string
-      vex:
+      vex-documents:
         description: >-
           Comma-separated list of relative paths within the repository to OpenVEX
           documents, reaching trivy as --vex. Spelled like `trivyignores` above, and
@@ -152,7 +152,7 @@ jobs:
           IMAGE_DIRECTORIES: ${{ inputs.image-directories }}
           COMPOSE_DIRECTORIES: ${{ inputs.compose-directories }}
           REPOSITORY: ${{ github.event.repository.name }}
-          SCAN_GATE: ${{ inputs.scan-gate }}
+          SCAN_GATE: ${{ inputs.vulnerability-gate }}
         run: |
           set -euo pipefail
           # `required` is satisfied by a key being present, and an unset variable reaches
@@ -164,7 +164,7 @@ jobs:
           # Checked HERE rather than where it is read, so a typo fails before any image is
           # built: an unrecognised value silently gating nothing is the whole risk.
           if [ "$SCAN_GATE" != 'always' ] && [ "$SCAN_GATE" != 'release' ]; then
-            echo "::error::scan-gate must be 'always' or 'release', got: '$SCAN_GATE'"
+            echo "::error::vulnerability-gate must be 'always' or 'release', got: '$SCAN_GATE'"
             exit 1
           fi
           printf '%s' "$IMAGE_DIRECTORIES" > /tmp/image-directories.json
@@ -316,11 +316,11 @@ jobs:
       # SET ONLY WHEN THE CALLER NAMED ONE, which is why this is a step and not another
       # `env:` key below. TRIVY_VEX is a string LIST, so an empty value does not read as
       # "no sources" - it reads as one source whose path is the empty string, and trivy
-      # fails opening it. The action exposes no `vex` input, hence the variable.
+      # fails opening it. The action exposes no VEX input, hence the variable.
       - name: Select the VEX sources
-        if: inputs.vex != ''
+        if: inputs.vex-documents != ''
         env:
-          VEX: ${{ inputs.vex }}
+          VEX: ${{ inputs.vex-documents }}
         run: printf 'TRIVY_VEX=%s\n' "$VEX" >> "$GITHUB_ENV"
 
       - name: Scan the ${{ matrix.directory }} image
@@ -343,13 +343,13 @@ jobs:
       # cannot walk, trivy resolves the empty config `{}`, reports nothing and exits 0 -
       # and `{}` declares no platform, which is what the wrong-image check catches.
       #
-      # ONLY THE SECOND IS CONDITIONAL. `scan-gate` can relax the vulnerability check. It
+      # ONLY THE SECOND IS CONDITIONAL. `vulnerability-gate` can relax the vulnerability check. It
       # can never relax the wrong-image check, because a scan of the wrong thing reports
       # no findings and would otherwise read as a clean image.
       - name: Gate on the scan
         env:
           DIRECTORY: ${{ matrix.directory }}
-          SCAN_GATE: ${{ inputs.scan-gate }}
+          SCAN_GATE: ${{ inputs.vulnerability-gate }}
           EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
@@ -374,7 +374,7 @@ jobs:
           if [ -n "$findings" ]; then
             printf '%s\n' "$findings"
             count="$(printf '%s\n' "$findings" | wc -l)"
-            # The ONE branch `scan-gate: release` buys. The log line above is printed
+            # The ONE branch `vulnerability-gate: release` buys. The log line above is printed
             # either way, so a run reports the same findings whether or not it blocks on
             # them; the summary is what survives into a reader's pull request view.
             if [ "$SCAN_GATE" = 'release' ] && [ "$EVENT" = 'pull_request' ]; then

@@ -215,8 +215,8 @@ in outline:
 | `aws-ssm-parameter` | *(required)* | Absolute SSM path holding the Docker Hub PAT. Not a secret: a path is an address. |
 | `dockerhub-namespace` | *(required)* | Docker Hub namespace every image publishes under. Must be the account the PAT belongs to, which nothing checks. |
 | `trivyignores` | *(none)* | Comma-separated list of relative paths within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml` file. |
-| `vex` | *(none)* | Comma-separated list of relative paths to OpenVEX documents, reaching Trivy as `--vex`. A `not_affected` or `fixed` statement suppresses its finding; `affected` does not. |
-| `scan-gate` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and reports to the job summary on a `pull_request`. The separate wrong-image check is never relaxed. |
+| `vex-documents` | *(none)* | Comma-separated list of relative paths to OpenVEX documents, reaching Trivy as `--vex`. A `not_affected` or `fixed` statement suppresses its finding; `affected` does not. |
+| `vulnerability-gate` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and reports to the job summary on a `pull_request`. The separate wrong-image check is never relaxed. |
 
 #### Secrets
 

@@ -93,14 +93,14 @@ and the finding fails the release again, so a suppression cannot outlive its rea
 being forgotten. Removing the date instead of extending it turns the file into a permanent
 blind spot.
 
-A finding that is unreachable in the image belongs in the **`vex`** input instead: a
-comma-separated list of relative paths to OpenVEX documents, spelled like `trivyignores`
-and applied to every image scan the same way. A `not_affected` or `fixed` statement
-suppresses its finding; an `affected` or `under_investigation` one does not, so recording
-a reachable finding there does not hide it from the gate. The split is by what expires.
-Unreachability is a property of the image and does not rot, so a VEX statement carries a
-justification and no date; a finding merely waiting for a fix keeps a dated
-`.trivyignore` entry.
+A finding that is unreachable in the image belongs in the **`vex-documents`** input
+instead: a comma-separated list of relative paths to OpenVEX documents, spelled like
+`trivyignores` and applied to every image scan the same way. A `not_affected` or `fixed`
+statement suppresses its finding; an `affected` or `under_investigation` one does not,
+so recording a reachable finding there does not hide it from the gate. The split is by
+what expires. Unreachability is a property of the image and does not rot, so a VEX
+statement carries a justification and no date; a finding merely waiting for a fix keeps
+a dated `.trivyignore` entry.
 
 ## Which events a HIGH or CRITICAL finding fails
 
@@ -109,10 +109,10 @@ this image: pointed at a layout it cannot walk, trivy resolves the empty config 
 reports nothing and exits 0, so a broken scan and a clean image look identical. The
 **vulnerability check** is the HIGH or CRITICAL findings themselves.
 
-The **`scan-gate`** input moves the vulnerability check and nothing else. `always`, the
-default, fails every caller event, which is what every release before the input existed
-did. `release` fails a release and, on a `pull_request`, writes the findings to the job
-summary and passes.
+The **`vulnerability-gate`** input moves the vulnerability check and nothing else.
+`always`, the default, fails every caller event, which is what every release before the
+input existed did. `release` fails a release and, on a `pull_request`, writes the
+findings to the job summary and passes.
 
 `release` is for a repository that will not have a pull request blocked by drift in a base
 image its author does not control: a base whose packages have a published fix the upstream
