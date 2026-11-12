@@ -1,0 +1,24 @@
+# What this repository publishes, read by .github/workflows/docker-hub-publish.yml.
+#
+# THIS REPOSITORY IS ITS OWN CALLER: _test-docker-hub-publish.yml calls the workflow by local
+# path, so this file is both the fixture the test runs against and the worked example a consumer
+# copies. README.md documents every key.
+#
+# `gates:` is deliberately absent, so the test covers the `always` default. The `release` branch
+# cannot be covered here - _test-docker-hub-publish.yml records why.
+images:
+  directories:
+    # Declares both suppression keys, so the test can assert this leg receives its own paths.
+    # Each path resolves against THIS directory: fixture-image/.trivyignore.yaml and
+    # fixture-image/fixture.openvex.json. One file per element.
+    fixture-image:
+      trivyignores:
+        - .trivyignore.yaml
+      vex-documents:
+        - fixture.openvex.json
+    # Declares NOTHING, which is the assertion: a suppression belongs to one image, so this
+    # leg must receive no paths at all rather than the other image's.
+    fixture-image-plain:
+
+compose-projects:
+  fixture-compose:

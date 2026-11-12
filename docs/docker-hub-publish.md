@@ -29,6 +29,7 @@ policy below is unaffected by it.
 | --- | --- |
 | `id-token: write` on the calling job | The permissions ceiling is validated at run start, so a caller granting less fails with `startup_failure` and no job logs |
 | The triggers and the concurrency group | This workflow declares neither. See [Concurrency](#concurrency) |
+| A config file declaring what the repository publishes, `.github/docker-hub-publish.yml` by default | The one place image directories, compose projects, suppressions and the gate are declared. `README.md` documents every key |
 | A `Dockerfile` and a `docker-bake.hcl` declaring `target "image"` per image directory | `bake-target: image` and `targets: image` are fixed in this workflow |
 | A `compose.yaml` declaring `name: <repository>-<directory>` per compose directory | Gated. See [What fails a release](#what-fails-a-release) |
 | Non-nested directories | `compose` refuses a nested directory, and the build artifact is named `image-<directory>`, which cannot contain a slash |
@@ -36,7 +37,7 @@ policy below is unaffected by it.
 | The AWS objects below | |
 
 No `.env` file is required beside a compose file, and no `.trivyignore` file is required
-anywhere.
+anywhere: an image with nothing to suppress is one key in the config file and no more.
 
 `push` runs on the `release` event alone. Every other event builds, scans and gates, and
 publishes nothing.
@@ -84,18 +85,34 @@ rather than implied by a semver tag, and it is applied on the `release` event al
 
 A **HIGH or CRITICAL** Trivy finding in any image.
 
-Suppressions go in the **`trivyignores`** input: a comma-separated list of relative paths
-within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml`
-file.
+Suppressions go in a **`trivyignores`** list under that image's own directory in the config
+file: `.trivyignore` or `.trivyignore.yaml` files, one file per element, resolved against
+the image directory.
+
+```yaml
+images:
+  directories:
+    frontend:
+      trivyignores:
+        - .trivyignore.yaml
+```
+
+**Per image, and that is load-bearing.** A suppression is a risk acceptance for one image,
+and acceptances diverge: a CVE shared by two images is fixed in one of them first. The day
+`frontend` is rebuilt clean, its entry is deleted from `frontend/.trivyignore.yaml` and
+`backend` is untouched. Pointing both images at one shared file makes that impossible
+without splitting the file, and until it is split the stale entry masks a regression in the
+image that was fixed. A path that is absolute or contains a `..` component is refused, so
+the coupling cannot be expressed.
 
 Give every suppression an `expired_at` date. On that date Trivy stops honouring the entry
 and the finding fails the release again, so a suppression cannot outlive its reason by
 being forgotten. Removing the date instead of extending it turns the file into a permanent
 blind spot.
 
-A finding that is unreachable in the image belongs in the **`vex-documents`** input
-instead: a comma-separated list of relative paths to OpenVEX documents, applied to every
-image scan. A `not_affected` or `fixed`
+A finding that is unreachable in the image belongs in a **`vex-documents`** list instead,
+beside `trivyignores` under the same image and resolved the same way: OpenVEX documents,
+one file per element, applied to that image's scan alone. A `not_affected` or `fixed`
 statement suppresses its finding; an `affected` or `under_investigation` one does not,
 so recording a reachable finding there does not hide it from the gate. The split is by
 what expires. Unreachability is a property of the image and does not rot, so a VEX
@@ -109,9 +126,20 @@ this image: pointed at a layout it cannot walk, trivy resolves the empty config 
 reports nothing and exits 0, so a broken scan and a clean image look identical. The
 **vulnerability check** is the HIGH or CRITICAL findings themselves.
 
-The **`vulnerability-gate`** input moves the vulnerability check and nothing else.
-`always` fails every caller event. `release` fails a release and, on a `pull_request`,
-writes the findings to the job summary and passes.
+**`images.gates.vulnerability`** in the config file moves the vulnerability check and
+nothing else. `always`, the default, fails every caller event. `release` fails a release
+and, on a `pull_request`, writes the findings to the job summary and passes.
+
+```yaml
+images:
+  gates:
+    vulnerability: release
+```
+
+It is nested under `images:` because it governs image scans and nothing else scans today.
+It is not an input, because the inputs describe the caller's environment while the config
+file holds what the repository contains and the policy applied to it — so a second gate,
+should another scanner ever be added, is one more key here rather than one more input.
 
 `release` is for a repository that will not have a pull request blocked by drift in a base
 image its author does not control: a base whose packages have a published fix the upstream

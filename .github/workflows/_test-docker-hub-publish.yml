@@ -7,10 +7,10 @@ name: docker-hub-publish test
 # validates fixture-compose, then asserts what a consumer would actually notice if it
 # broke.
 #
-# BOTH FIXTURES ARE TOP-LEVEL DIRECTORIES, which is forced twice over and is not a tidiness
+# EVERY FIXTURE IS A TOP-LEVEL DIRECTORY, which is forced twice over and is not a tidiness
 # choice. The compose job refuses a nested directory outright, and the build job's artifact
 # is named `image-<directory>`, which upload-artifact rejects if the name contains a slash.
-# Moving either fixture under test/ breaks this test in two different places.
+# Moving any fixture under test/ breaks this test in two different places.
 #
 # The workflow declares NO workflow_call outputs, so there is nothing to assert the way
 # _test-update-pixi-dependencies.yml asserts its own. What crosses the boundary instead are
@@ -31,11 +31,16 @@ name: docker-hub-publish test
 # than a repository secret is what keeps this green on a fork pull request, where secrets
 # are never available. Nothing ever assumes it: the only step that reads it is in `push`.
 #
-# `trivyignores` is left unset, asserting that a caller suppressing nothing needs no file.
+# THE CONFIG FILE IS .github/docker-hub-publish.yml, and the `config` input is left unset so
+# the run also asserts that its default finds it. The file declares TWO images: fixture-image
+# with both suppression keys, and fixture-image-plain with none. That pairing is the only
+# arrangement that proves each matrix leg receives its OWN suppression paths rather than the
+# union of every image's, which is the defect the config file replaced. `assert` reads both
+# legs' staged `suppressions` back to check it.
 #
-# `vulnerability-gate` and `vex-documents` are left unset too, asserting their defaults.
+# `images.gates` is left out of the config file, asserting the `always` default.
 #
-# The `release` branch of `vulnerability-gate` is NOT covered here, and cannot be. It
+# The `release` branch of the vulnerability gate is NOT covered here, and cannot be. It
 # needs an image carrying HIGH or CRITICAL findings, while fixture-image is FROM scratch
 # precisely so this repository's required check cannot fail on a CVE published against a
 # base. A second call job with a vulnerable fixture does not work either: the `compose`
@@ -62,8 +67,9 @@ jobs:
       contents: read
       id-token: write
     with:
-      image-directories: '["fixture-image"]'
-      compose-directories: '["fixture-compose"]'
+      # No `config`: the default, .github/docker-hub-publish.yml, is what declares both image
+      # directories and the compose project, and the default is part of what this asserts.
+      #
       # Well-formed but inert. Everything that validates them runs in `push`, which skips
       # here, so these only have to satisfy the declarations.
       aws-region: eu-north-1
@@ -81,33 +87,68 @@ jobs:
           name: image-fixture-image
           path: /tmp/image
 
+      # The second matrix leg, which exists to carry NO suppressions. Downloading it is also
+      # the assertion that the config file produced two legs rather than one.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-fixture-image-plain
+          path: /tmp/image-plain
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: compose-files
           path: /tmp/compose
 
-      - name: Assert the image archive, its digest and its repository
+      - name: Assert each image archive, its digest and its repository
         run: |
           set -euo pipefail
-          ls -la /tmp/image
+          ls -la /tmp/image /tmp/image-plain
 
           # THE NAME FORMULA, which is the one thing a consumer cannot recover if it
           # changes: <namespace>/<repository>-<directory>. The namespace is the input
-          # above, the repository is this one, and the directory is the matrix leg.
-          repository="$(cat /tmp/image/repository)"
-          echo "repository=$repository"
-          test "$repository" = 'fixture-namespace/workflows-fixture-image'
+          # above, the repository is this one, and the directory is the matrix leg - which
+          # now comes from the config file rather than from an input.
+          for leg in 'image:fixture-image' 'image-plain:fixture-image-plain'; do
+            path="/tmp/${leg%%:*}"
+            directory="${leg#*:}"
 
-          # A digest, and the shape of one: the push job resolves the archive against it,
-          # so an empty or malformed value is a release that pushes nothing.
-          digest="$(cat /tmp/image/digest)"
-          echo "digest=$digest"
-          grep -qE '^sha256:[0-9a-f]{64}$' <<<"$digest"
+            repository="$(cat "$path/repository")"
+            echo "$directory repository=$repository"
+            test "$repository" = "fixture-namespace/workflows-$directory"
 
-          # The archive is a real OCI layout, not an empty tar: the unpack the scan and
-          # the push both depend on.
-          tar -tf /tmp/image/image.oci.tar | grep -qx 'oci-layout'
-          tar -tf /tmp/image/image.oci.tar | grep -qx 'index.json'
+            # A digest, and the shape of one: the push job resolves the archive against it,
+            # so an empty or malformed value is a release that pushes nothing.
+            digest="$(cat "$path/digest")"
+            echo "$directory digest=$digest"
+            grep -qE '^sha256:[0-9a-f]{64}$' <<<"$digest"
+
+            # The archive is a real OCI layout, not an empty tar: the unpack the scan and
+            # the push both depend on.
+            tar -tf "$path/image.oci.tar" | grep -qx 'oci-layout'
+            tar -tf "$path/image.oci.tar" | grep -qx 'index.json'
+          done
+
+      # WHAT THE WHOLE CHANGE EXISTS FOR. trivyignores and vex-documents were inputs, so one
+      # list reached every image's scan and a finding accepted for one image was accepted for
+      # all of them. They are per directory now, and these two legs differ, so the old union
+      # behaviour would show up here as fixture-image-plain carrying fixture-image's paths.
+      - name: Assert each image got its own suppressions and no other's
+        run: |
+          set -euo pipefail
+          cat /tmp/image/suppressions /tmp/image-plain/suppressions
+
+          # Prefixed with the image's own directory, which is what makes a suppression an
+          # acceptance for ONE image: two images cannot name one file, so they diverge the
+          # day one of them is fixed rather than masking the other's regression.
+          test "$(jq -r '.trivyignores' /tmp/image/suppressions)" \
+            = 'fixture-image/.trivyignore.yaml'
+          test "$(jq -r '."vex-documents"' /tmp/image/suppressions)" \
+            = 'fixture-image/fixture.openvex.json'
+
+          # EMPTY, not inherited. Empty is also why the TRIVY_VEX step stays guarded: the
+          # variable is a string list, so one empty path reads as a source trivy cannot open.
+          test "$(jq -r '.trivyignores' /tmp/image-plain/suppressions)" = ''
+          test "$(jq -r '."vex-documents"' /tmp/image-plain/suppressions)" = ''
 
       - name: Assert every compose directory was staged
         run: |

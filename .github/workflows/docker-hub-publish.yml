@@ -1,9 +1,16 @@
 name: Docker Hub publish
 
-# Builds, scans and publishes one image per directory it is given, then publishes one OCI
-# compose artifact per compose directory it is given. CALLED, never triggered. It names no
-# repository, no file outside the directories it is handed, and exactly two variables:
-# IMAGE_PREFIX and IMAGE_TAG, which is the whole contract a compose file answers to.
+# Builds, scans and publishes one image per directory its CONFIG FILE declares, then publishes
+# one OCI compose artifact per compose project the same file declares. CALLED, never triggered.
+# It names no repository, no file outside that config and the directories the config declares,
+# and exactly two variables: IMAGE_PREFIX and IMAGE_TAG, which is the whole contract a compose
+# file answers to.
+# THE CONFIG FILE IS THE WHOLE IMAGE INTERFACE, because GitHub Actions has no hierarchical
+# input syntax and per-image settings cannot be expressed as inputs. A suppression is a risk
+# acceptance for ONE image, so `trivyignores` and `vex-documents` live per directory and
+# resolve against that directory; as inputs they applied to the union of every image built,
+# which meant a finding accepted for one image was accepted for all of them. The inputs that
+# remain describe the CALLER'S ENVIRONMENT - where it publishes and how it authenticates.
 # TWO INVARIANTS, and a change that breaks either is a security regression: no job that
 # checks the repository out gets `id-token: write`, and nothing here reads `vars` or names
 # an AWS object. The logs are world-readable, so nothing added may print the account id or
@@ -21,34 +28,37 @@ name: Docker Hub publish
 on:
   workflow_call:
     inputs:
-      image-directories:
-        # A JSON array, because `strategy` below reads it through `fromJSON`: that is the
-        # one place `env` cannot reach, so the matrix is what fixes the format.
+      config:
+        # The ONE input describing this repository's content, and the reason `meta` checks the
+        # repository out: `strategy` below reads `inputs` and `needs` but cannot read a file, so
+        # the directory list has to reach `build` as a job output rather than from here.
         description: >-
-          JSON array of directories built into images, one per image, each holding a
-          Dockerfile and a docker-bake.hcl. The repository each image publishes to is
-          composed from the directory name - see the `images` step. A directory listed
-          twice is refused, the name being both a matrix leg and an artifact. Images only;
-          compose files are the input below.
-        required: true
-        type: string
-      compose-directories:
-        description: >-
-          JSON array of directories published as OCI compose artifacts, one per directory,
-          each holding a compose.yaml. The repository each publishes to is composed from
-          the directory name exactly as an image's is, so a directory named `stack`
-          publishes to <namespace>/<repository>-stack. THE NAME: the file's `name:` must
-          equal <repository>-<directory>, and the directory must not be nested, so the
-          project, its network and its volume are readable off the artifact's reference
-          and two repositories cannot collide on one host. THE CONTRACT: this workflow sets
-          IMAGE_PREFIX, to <namespace>/<repository>, and IMAGE_TAG, to the tag being
-          published, and NAMES NOTHING ELSE. Every other variable the file interpolates
-          must carry a `:?` guard or a `:-` default, because the file is published
-          uninterpolated and a bare ${...} renders empty on a deploy host. No .env is
-          required. A directory listed twice is refused. Empty by default, for a
-          repository that publishes images alone.
+          Path to the YAML file declaring what this repository publishes, relative to the
+          repository root. `images.directories` is a mapping keyed by directory, one key per
+          image, each directory holding a Dockerfile and a docker-bake.hcl; the repository an
+          image publishes to is composed from its key - see the `images` step. A duplicate
+          directory is a YAML error, which is what a mapping buys over a list: the key is both a
+          matrix leg and an artifact name. An image's `trivyignores` and `vex-documents` are
+          lists of ONE FILE PER ELEMENT, resolved against THAT IMAGE'S OWN DIRECTORY - an
+          absolute path or one containing `..` is refused, because a suppression is a risk
+          acceptance for a single image and two images sharing one file cannot diverge when one
+          of them is fixed. `images.gates.vulnerability` decides which caller events a HIGH or
+          CRITICAL finding fails: `always`, the default, fails every event, and `release` fails a
+          release while on a pull_request writing the findings to the job summary and passing. It
+          moves the vulnerability check alone; the check that trivy scanned this image, and not
+          something else, fails under either value. `compose-projects` is a mapping keyed the same
+          way for directories published as OCI compose artifacts, and is omitted by a repository
+          that publishes images alone. THE COMPOSE NAME: each such file's `name:` must equal
+          <repository>-<directory>, and the directory must not be nested, so the project, its
+          network and its volume are readable off the artifact's reference and two repositories
+          cannot collide on one host. THE COMPOSE CONTRACT: this workflow sets IMAGE_PREFIX, to
+          <namespace>/<repository>, and IMAGE_TAG, to the tag being published, and NAMES NOTHING
+          ELSE. Every other variable such a file interpolates must carry a `:?` guard or a `:-`
+          default, because the file is published uninterpolated and a bare ${...} renders empty on
+          a deploy host. No .env is required. README.md documents the file and
+          docs/docker-hub-publish.md says when to pass `release`.
         required: false
-        default: "[]"
+        default: .github/docker-hub-publish.yml
         type: string
       aws-region:
         description: >-
@@ -73,34 +83,6 @@ on:
           Validated in the `images` step, which is also where it becomes half of each
           repository name.
         required: true
-        type: string
-      trivyignores:
-        description: >-
-          Comma-separated list of relative paths within the repository to one or more
-          .trivyignore files, or a single .trivyignore.yaml file.
-        required: false
-        default: ''
-        type: string
-      vulnerability-gate:
-        description: >-
-          Which caller events a HIGH or CRITICAL finding fails. `always` fails every
-          event. `release` fails a release, and on a pull_request writes the findings to
-          the job summary and passes. An unrecognised value fails the `images` step,
-          before any image is built. This input moves the vulnerability check alone: the
-          check that trivy scanned this image, and not something else, fails under either
-          value. docs/docker-hub-publish.md says when to pass `release`.
-        required: false
-        default: always
-        type: string
-      vex-documents:
-        description: >-
-          Comma-separated list of relative paths within the repository to OpenVEX
-          documents, reaching trivy as --vex. Applied to every image scan. A
-          `not_affected` or `fixed` statement suppresses its finding. An `affected` or
-          `under_investigation` one does not, so a reachable finding recorded here still
-          reaches the gate.
-        required: false
-        default: ''
         type: string
     secrets:
       aws-role-arn:
@@ -139,68 +121,202 @@ jobs:
       image-prefix: ${{ steps.images.outputs.image-prefix }}
       bake-labels: ${{ steps.bake.outputs.labels }}
       bake-annotations: ${{ steps.bake.outputs.annotations }}
+      # What `strategy` and `compose` read in place of the inputs they used to. JSON arrays,
+      # because `strategy` resolves the matrix through `fromJSON` and that is the one place
+      # neither `env` nor `steps` can reach.
+      image-directories: ${{ steps.images.outputs.image-directories }}
+      compose-directories: ${{ steps.images.outputs.compose-directories }}
+      # Directory to its own suppression paths, read per matrix leg exactly as
+      # image-repositories already is. The union is what this change exists to end.
+      suppressions: ${{ steps.images.outputs.suppressions }}
+      vulnerability-gate: ${{ steps.images.outputs.vulnerability-gate }}
     steps:
+      # THE ONLY REASON THIS JOB CHECKS OUT, and it holds no credential for what it reads:
+      # `strategy` below cannot read a file, so the config has to be parsed into a job output
+      # here, and the checks that a directory really holds a Dockerfile and that a named
+      # suppression file is really present need the repository rather than the config alone.
+      # The header's invariant is untouched - this job has no `id-token: write`, and it executes
+      # nothing it checks out, unlike `build` and `compose` which both run repository tooling.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       # THE IMAGE NAME IS COMPOSED HERE AND NOWHERE ELSE: <namespace>/<repository>-<dir>,
       # read back from `image-list` and `image-map` so no consumer can spell one differently.
       # `image-list` is comma-joined because metadata-action splits `images` on newlines only,
       # then CSV-parses each line. Single-line outputs for the reason the bake step gives.
-      - name: Compose the repository each directory publishes to
+      #
+      # THE CONFIG IS PARSED AND VALIDATED HERE TOO, for the reason the checkout above gives,
+      # and every check runs BEFORE ANY IMAGE IS BUILT: a mistyped suppression path reaching the
+      # scan would be a suppression that silently does not load, which is the same class of risk
+      # the gate check below has always been placed here to avoid.
+      - name: Read the config and compose the repository each directory publishes to
         id: images
         env:
-          IMAGE_DIRECTORIES: ${{ inputs.image-directories }}
-          COMPOSE_DIRECTORIES: ${{ inputs.compose-directories }}
+          CONFIG: ${{ inputs.config }}
           REPOSITORY: ${{ github.event.repository.name }}
-          VULNERABILITY_GATE: ${{ inputs.vulnerability-gate }}
         run: |
           set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
           # `required` is satisfied by a key being present, and an unset variable reaches
           # a called workflow as an empty string.
           if [[ ! "$DOCKERHUB_NAMESPACE" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-            echo "::error::dockerhub-namespace must be lowercase letters, digits, - or _, got: '$DOCKERHUB_NAMESPACE'"
-            exit 1
+            fail "dockerhub-namespace must be lowercase letters, digits, - or _, got: '$DOCKERHUB_NAMESPACE'"
           fi
+
+          # Checked rather than assumed: the runner image ships yq, and a missing binary would
+          # otherwise surface as a jq parse error on an empty file.
+          command -v yq > /dev/null || fail "yq is not on PATH"
+          [ -f "$CONFIG" ] || fail "config file not found: $CONFIG"
+          # ONE conversion, so every check below is jq on JSON rather than two query languages.
+          yq -o=json '.' "$CONFIG" > /tmp/config.json
+          jq -e 'type == "object"' /tmp/config.json > /dev/null \
+            || fail "$CONFIG must contain a YAML mapping"
+
+          # STRUCTURE, before anything reads through it. A directory declared with nothing to say
+          # is `backend:` with no value, which is null here, so null is legal wherever a mapping
+          # is and `// {}` stands in for it.
+          kind="$(jq -r '.images | type' /tmp/config.json)"
+          [ "$kind" = object ] || fail "images: must be a mapping, got $kind"
+          kind="$(jq -r '.images.directories | type' /tmp/config.json)"
+          [ "$kind" = object ] || fail "images.directories: must be a mapping, got $kind"
+          [ "$(jq -r '.images.directories | length' /tmp/config.json)" -gt 0 ] \
+            || fail "images.directories: must declare at least one directory"
+          kind="$(jq -r '.images.gates // {} | type' /tmp/config.json)"
+          [ "$kind" = object ] || fail "images.gates: must be a mapping, got $kind"
+          kind="$(jq -r '.["compose-projects"] // {} | type' /tmp/config.json)"
+          [ "$kind" = object ] || fail "compose-projects: must be a mapping, got $kind"
+
+          # `keys_unsorted`, so the file's order is the matrix's order. A directory declared
+          # twice never reaches here: duplicate keys are a YAML error, which is the whole
+          # reason these are mappings rather than lists.
+          jq -r '.images.directories | keys_unsorted[]' /tmp/config.json > /tmp/image-directories
+          jq -r '.["compose-projects"] // {} | keys_unsorted[]' /tmp/config.json \
+            > /tmp/compose-directories
+
+          # EVERY CHECK ON ONE IMAGE IN ONE PLACE.
+          while read -r directory; do
+            kind="$(jq -r --arg d "$directory" '.images.directories[$d] | type' /tmp/config.json)"
+            if [ "$kind" != object ] && [ "$kind" != null ]; then
+              fail "images.directories.$directory: must be a mapping or empty, got $kind"
+            fi
+            [ -d "$directory" ] || fail "images.directories.$directory: no such directory"
+            for required in Dockerfile docker-bake.hcl; do
+              [ -f "$directory/$required" ] \
+                || fail "images.directories.$directory: $directory/$required not found"
+            done
+            for key in trivyignores vex-documents; do
+              kind="$(jq -r --arg d "$directory" --arg k "$key" \
+                '(.images.directories[$d] // {})[$k] | type' /tmp/config.json)"
+              if [ "$kind" = null ]; then
+                continue
+              fi
+              [ "$kind" = array ] \
+                || fail "images.directories.$directory.$key: must be a list, got $kind"
+              # `@json` rather than `tostring`: tostring renders the empty string as nothing
+              # at all, which is indistinguishable from "no bad elements" once the command
+              # substitution has stripped it, and the empty element then reached the
+              # existence check and was reported as a missing file instead.
+              bad="$(jq -r --arg d "$directory" --arg k "$key" \
+                '(.images.directories[$d] // {})[$k][]
+                 | select(type != "string" or . == "") | @json' /tmp/config.json)"
+              [ -z "$bad" ] \
+                || fail "images.directories.$directory.$key: every element must be a non-empty string, got: $bad"
+              jq -r --arg d "$directory" --arg k "$key" \
+                '(.images.directories[$d] // {})[$k][]' /tmp/config.json > /tmp/suppression-paths
+              while read -r path; do
+                # ONE FILE PER ELEMENT. The list is comma-joined for trivy, which splits on the
+                # comma, so an element carrying one would silently become two paths.
+                case "$path" in
+                  *,*) fail "images.directories.$directory.$key: '$path' must name one file, and a comma separates two" ;;
+                  /*) fail "images.directories.$directory.$key: '$path' must be relative to the image directory" ;;
+                  # A no-op default, for the reason the compose loop's own `case` gives.
+                  *) ;;
+                esac
+                # Matched as a whole path component, so a file named `v1..2` is not refused.
+                # A suppression is a risk acceptance for ONE image: reaching out of the
+                # directory would let two images share one acceptance, which then cannot
+                # diverge when one of them is fixed and silently masks its regression.
+                case "/$path/" in
+                  */../*) fail "images.directories.$directory.$key: '$path' must not leave the image directory" ;;
+                  *) ;;
+                esac
+                [ -f "$directory/$path" ] \
+                  || fail "images.directories.$directory.$key: $directory/$path not found"
+              done < /tmp/suppression-paths
+            done
+          done < /tmp/image-directories
+
+          # Nesting is refused here as well as in `compose`, so it fails before any image is
+          # built rather than after one: nested composes a three-component Hub repository, and
+          # a project name whose silently stripped slash collides with the flat spelling.
+          while read -r directory; do
+            [ -n "$directory" ] || continue
+            case "$directory" in
+              */*) fail "compose-projects.$directory: must not be nested" ;;
+              # A no-op default. SonarCloud's "add a default case" rule is a required
+              # check in this repository, and the `case` already fell through when no
+              # pattern matched, so this spells out what it already did.
+              *) ;;
+            esac
+            [ -d "$directory" ] || fail "compose-projects.$directory: no such directory"
+            [ -f "$directory/compose.yaml" ] \
+              || fail "compose-projects.$directory: $directory/compose.yaml not found"
+          done < /tmp/compose-directories
+
           # Checked HERE rather than where it is read, so a typo fails before any image is
           # built: an unrecognised value silently gating nothing is the whole risk.
-          if [ "$VULNERABILITY_GATE" != 'always' ] && [ "$VULNERABILITY_GATE" != 'release' ]; then
-            echo "::error::vulnerability-gate must be 'always' or 'release', got: '$VULNERABILITY_GATE'"
-            exit 1
-          fi
-          printf '%s' "$IMAGE_DIRECTORIES" > /tmp/image-directories.json
-          printf '%s' "$COMPOSE_DIRECTORIES" > /tmp/compose-directories.json
-          # A string passes `length > 0` too, so the type is what is checked.
-          if ! jq -e 'type == "array" and length > 0' /tmp/image-directories.json > /dev/null; then
-            echo "::error::image-directories must be a non-empty JSON array, got: $IMAGE_DIRECTORIES"
-            exit 1
-          fi
-          # Empty is legal here: a repository may publish images and no compose file.
-          if ! jq -e 'type == "array"' /tmp/compose-directories.json > /dev/null; then
-            echo "::error::compose-directories must be a JSON array, got: $COMPOSE_DIRECTORIES"
-            exit 1
-          fi
-          # A repeat is not a no-op: image-directories drives a matrix, so two legs would race
-          # on one artifact name, and the compose loop would publish one artifact twice.
-          for file in /tmp/image-directories.json /tmp/compose-directories.json; do
-            if ! jq -e 'length == (unique | length)' "$file" > /dev/null; then
-              echo "::error::$(basename "$file" .json) repeats a directory:" \
-                "$(jq -c '[group_by(.)[] | select(length > 1) | first]' "$file")"
-              exit 1
-            fi
-          done
+          gate="$(jq -r '.images.gates.vulnerability // "always"' /tmp/config.json)"
+          [ "$gate" = always ] || [ "$gate" = release ] \
+            || fail "images.gates.vulnerability must be 'always' or 'release', got: '$gate'"
+          printf 'vulnerability-gate=%s\n' "$gate" >> "$GITHUB_OUTPUT"
+
           # THE PREFIX, which every name below is built on and which `push` exports to
           # compose as IMAGE_PREFIX. A compose artifact is named by the same formula as an
-          # image, so the two halves differ in nothing but which list they read.
+          # image, so the two halves differ in nothing but which mapping they read.
           prefix="$DOCKERHUB_NAMESPACE/$REPOSITORY"
           printf 'image-prefix=%s\n' "$prefix" >> "$GITHUB_OUTPUT"
-          jq -r --arg p "$prefix" '[.[] | "\($p)-\(.)"] | join(",")' \
-            /tmp/image-directories.json | sed 's/^/image-list=/' >> "$GITHUB_OUTPUT"
-          jq -c --arg p "$prefix" 'map({key: ., value: "\($p)-\(.)"}) | from_entries' \
-            /tmp/image-directories.json | sed 's/^/image-map=/' >> "$GITHUB_OUTPUT"
-          jq -r --arg p "$prefix" '[.[] | "\($p)-\(.)"] | join(",")' \
-            /tmp/compose-directories.json | sed 's/^/compose-list=/' >> "$GITHUB_OUTPUT"
-          jq -c --arg p "$prefix" 'map({key: ., value: "\($p)-\(.)"}) | from_entries' \
-            /tmp/compose-directories.json | sed 's/^/compose-map=/' >> "$GITHUB_OUTPUT"
-          jq -r --arg p "$prefix" '.[] | "\(.) -> \($p)-\(.)"' \
-            /tmp/image-directories.json /tmp/compose-directories.json
+
+          # ALWAYS WRITTEN, the empty compose case included: an output evaluating to the empty
+          # string is NOT SET AT ALL, and `fromJSON` on an unset output fails the run.
+          jq -c '.images.directories | keys_unsorted' /tmp/config.json \
+            | sed 's/^/image-directories=/' >> "$GITHUB_OUTPUT"
+          jq -c '.["compose-projects"] // {} | keys_unsorted' /tmp/config.json \
+            | sed 's/^/compose-directories=/' >> "$GITHUB_OUTPUT"
+
+          # Each image's OWN paths, prefixed with its directory because that is what they are
+          # relative to, and comma-joined because that is what trivy-action and TRIVY_VEX take.
+          # Composed here for the reason every name above is: one place spells them.
+          jq -c '
+            .images.directories
+            | with_entries(
+                .key as $d
+                | .value = ((.value // {}) as $e
+                    | {
+                        trivyignores: (($e.trivyignores // []) | map("\($d)/\(.)") | join(",")),
+                        "vex-documents": (($e["vex-documents"] // []) | map("\($d)/\(.)") | join(","))
+                      })
+              )
+          ' /tmp/config.json | sed 's/^/suppressions=/' >> "$GITHUB_OUTPUT"
+
+          jq -r --arg p "$prefix" '.images.directories | keys_unsorted
+            | map("\($p)-\(.)") | join(",")' \
+            /tmp/config.json | sed 's/^/image-list=/' >> "$GITHUB_OUTPUT"
+          jq -c --arg p "$prefix" '.images.directories | keys_unsorted
+            | map({key: ., value: "\($p)-\(.)"}) | from_entries' \
+            /tmp/config.json | sed 's/^/image-map=/' >> "$GITHUB_OUTPUT"
+          jq -r --arg p "$prefix" '.["compose-projects"] // {} | keys_unsorted
+            | map("\($p)-\(.)") | join(",")' \
+            /tmp/config.json | sed 's/^/compose-list=/' >> "$GITHUB_OUTPUT"
+          jq -c --arg p "$prefix" '.["compose-projects"] // {} | keys_unsorted
+            | map({key: ., value: "\($p)-\(.)"}) | from_entries' \
+            /tmp/config.json | sed 's/^/compose-map=/' >> "$GITHUB_OUTPUT"
+
+          jq -r --arg p "$prefix" '
+            [(.images.directories | keys_unsorted[]),
+             (.["compose-projects"] // {} | keys_unsorted[])][]
+            | "\(.) -> \($p)-\(.)"' /tmp/config.json
 
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta-images
@@ -221,7 +337,8 @@ jobs:
       # a compose file has no image artifact, so a name there would abort every release.
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta-compose
-        if: inputs.compose-directories != '[]'
+        # The step's own output, not a `needs` one: this runs inside the job that produced it.
+        if: steps.images.outputs.compose-directories != '[]'
         with:
           images: ${{ steps.images.outputs.compose-list }}
           flavor: latest=false
@@ -252,8 +369,10 @@ jobs:
       # Every image gets scanned even when one fails, so one run lists every finding.
       fail-fast: false
       matrix:
-        # `strategy` reads `github`, `needs`, `vars` and `inputs` only, never `env`.
-        directory: ${{ fromJSON(inputs.image-directories) }}
+        # `strategy` reads `github`, `needs`, `vars` and `inputs` only, never `env` and never
+        # `steps`. A FILE IS NOT AMONG THEM, which is why `meta` checks out and parses the
+        # config into this output rather than the matrix reading the config itself.
+        directory: ${{ fromJSON(needs.meta.outputs.image-directories) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -317,10 +436,14 @@ jobs:
       # IT IS A STRING LIST, so an empty value does not read as "no sources" - it reads as
       # one source whose path is the empty string, and trivy fails opening it. Hence a
       # guarded step rather than an `env:` key on the scan below.
+      #
+      # THIS LEG'S OWN SOURCES, read out of `meta`'s map by directory exactly as the
+      # repository name below is. Applying one list to every image was the defect this
+      # replaced: a finding accepted for one image was accepted for all of them.
       - name: Select the VEX sources
-        if: inputs.vex-documents != ''
+        if: fromJSON(needs.meta.outputs.suppressions)[matrix.directory]['vex-documents'] != ''
         env:
-          VEX_DOCUMENTS: ${{ inputs.vex-documents }}
+          VEX_DOCUMENTS: ${{ fromJSON(needs.meta.outputs.suppressions)[matrix.directory]['vex-documents'] }}
         run: printf 'TRIVY_VEX=%s\n' "$VEX_DOCUMENTS" >> "$GITHUB_ENV"
 
       - name: Scan the ${{ matrix.directory }} image
@@ -333,7 +456,9 @@ jobs:
           input: /tmp/oci
           scanners: vuln
           severity: HIGH,CRITICAL
-          trivyignores: ${{ inputs.trivyignores }}
+          # This leg's own files, for the reason the VEX step above gives. Empty is safe here,
+          # unlike TRIVY_VEX: the action passes no --ignorefile when the input is empty.
+          trivyignores: ${{ fromJSON(needs.meta.outputs.suppressions)[matrix.directory].trivyignores }}
           format: json
           output: /tmp/trivy.json
           exit-code: 0
@@ -343,12 +468,12 @@ jobs:
       # cannot walk, trivy resolves the empty config `{}`, reports nothing and exits 0 -
       # and `{}` declares no platform, which is what the wrong-image check catches.
       #
-      # `vulnerability-gate` relaxes the vulnerability check only. Relaxing the
+      # `images.gates.vulnerability` relaxes the vulnerability check only. Relaxing the
       # wrong-image check would let a scan of the wrong thing read as a clean image.
       - name: Gate on the scan
         env:
           DIRECTORY: ${{ matrix.directory }}
-          VULNERABILITY_GATE: ${{ inputs.vulnerability-gate }}
+          VULNERABILITY_GATE: ${{ needs.meta.outputs.vulnerability-gate }}
           EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
@@ -390,8 +515,11 @@ jobs:
 
       # Both travel with the archive, so `push` needs no list of its own and can prove
       # nothing changed in transit.
-      - name: Stage the archive, its digest and its repository
+      - name: Stage the archive, its digest, its repository and its suppressions
         env:
+          # Staged so the test workflow can assert that THIS leg got its own suppression paths
+          # and not another image's: nothing else crosses the job boundary to prove it.
+          SUPPRESSIONS: ${{ toJSON(fromJSON(needs.meta.outputs.suppressions)[matrix.directory]) }}
           # bake-action reports one entry per target rather than a bare digest.
           DIGEST: ${{ fromJSON(steps.build.outputs.metadata).image['containerimage.digest'] }}
           # Read back out of `meta`, not recomposed: the formula lives in one step.
@@ -402,7 +530,8 @@ jobs:
           mv /tmp/image.oci.tar /tmp/out/image.oci.tar
           printf '%s\n' "$DIGEST" > /tmp/out/digest
           printf '%s\n' "$IMAGE" > /tmp/out/repository
-          cat /tmp/out/digest /tmp/out/repository
+          printf '%s\n' "$SUPPRESSIONS" > /tmp/out/suppressions
+          cat /tmp/out/digest /tmp/out/repository /tmp/out/suppressions
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -417,6 +546,10 @@ jobs:
   # A LOOP RATHER THAN A MATRIX, and no `if:`: it builds nothing, and a job that always
   # runs never skips, which is what lets `push` keep the plain `needs` gate on empty input.
   compose:
+    # NEW, and the cost of the config file: this job read an input and ran in parallel with
+    # `meta`, and now reads a `meta` output, so it waits on a job that takes seconds. There is
+    # no `if:` even so - see the comment above.
+    needs: meta
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -428,7 +561,7 @@ jobs:
 
       - name: Validate and stage every compose directory
         env:
-          COMPOSE_DIRECTORIES: ${{ inputs.compose-directories }}
+          COMPOSE_DIRECTORIES: ${{ needs.meta.outputs.compose-directories }}
           REPOSITORY: ${{ github.event.repository.name }}
         run: |
           set -euo pipefail

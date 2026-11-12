@@ -21,7 +21,7 @@ jobs:
 
 | Workflow | Purpose |
 | --- | --- |
-| [`docker-hub-publish.yml`](#docker-hub-publish) | Build, scan, sign and publish one container image per directory to Docker Hub, plus an OCI compose artifact per compose directory, using GitHub OIDC and AWS to reach a Docker Hub credential. |
+| [`docker-hub-publish.yml`](#docker-hub-publish) | Build, scan, sign and publish one container image per directory declared in a config file to Docker Hub, plus an OCI compose artifact per compose project, using GitHub OIDC and AWS to reach a Docker Hub credential. |
 | [`update-pixi-dependencies.yml`](#update-pixi-dependencies) | Upgrade a [pixi](https://pixi.sh) workspace's dependencies and open a pull request with what moved — the updater Dependabot has no `pixi` ecosystem to provide. |
 
 Files prefixed with an underscore (`_release-please.yml`, `_sonarcloud.yml`) are this
@@ -130,9 +130,10 @@ that subject cuts a patch release.
 
 ### docker-hub-publish
 
-Builds one container image per directory you name, fails the release on a HIGH or CRITICAL
-Trivy finding, publishes each image to Docker Hub with `regctl`, signs every published
-digest with `cosign`, and publishes each compose directory as an OCI compose artifact.
+Builds one container image per directory a config file declares, fails the release on a HIGH
+or CRITICAL Trivy finding, publishes each image to Docker Hub with `regctl`, signs every
+published digest with `cosign`, and publishes each compose directory as an OCI compose
+artifact. Scan suppressions are declared per image, not per run.
 
 Docker Hub supports no OIDC for personal accounts, so the credential is reached through
 AWS: the publishing job mints a GitHub OIDC token, assumes an IAM role with it, and reads
@@ -167,13 +168,13 @@ concurrency:
 
 jobs:
   images:
-    uses: TomBorglum/workflows/.github/workflows/docker-hub-publish.yml@v1.1.0
+    uses: TomBorglum/workflows/.github/workflows/docker-hub-publish.yml@v2.0.0
     permissions:
       contents: read
       id-token: write
     with:
-      image-directories: '["backend", "frontend"]'
-      compose-directories: '["stack"]'
+      # Omitted: .github/docker-hub-publish.yml is the default. See The config file below.
+      # config: .github/docker-hub-publish.yml
       aws-region: ${{ vars.AWS_REGION }}
       aws-ssm-parameter: /my-project/release/dockerhub-pat
       dockerhub-namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
@@ -198,25 +199,65 @@ in outline:
 - An **SSM SecureString** holding a Docker Hub PAT with Read & Write, and an inline policy
   granting `ssm:GetParameter` on that one parameter ARN as a literal.
 - **`id-token: write`** on the calling job, as above.
+- A **config file**, `.github/docker-hub-publish.yml` by default, declaring what the
+  repository publishes. See The config file below.
 - Per image directory, a **`Dockerfile`** and a **`docker-bake.hcl` declaring
   `target "image"`**.
 - Per compose directory, a **`compose.yaml` declaring `name: <repository>-<directory>`**,
   with every variable it interpolates carrying a `:?` guard or a `:-` default. No `.env`
   is required.
-- **No nested directories** in either list.
+- **No nested directories** in either collection.
 
 #### Inputs
 
+The inputs describe the **caller's environment** — where it publishes and how it
+authenticates. What the repository *contains*, and the scan policy applied to it, live in the
+config file below.
+
 | Input | Default | Description |
 | --- | --- | --- |
-| `image-directories` | *(required)* | JSON array of directories built into images, one image each. Each holds a `Dockerfile` and a `docker-bake.hcl`. Publishes to `<namespace>/<repository>-<directory>`. |
-| `compose-directories` | `"[]"` | JSON array of directories published as OCI compose artifacts, one each, following the same name formula. Empty for a repository publishing images alone. |
+| `config` | `.github/docker-hub-publish.yml` | Path to the config file, relative to the repository root. |
 | `aws-region` | *(required)* | Region the role is assumed in and the PAT parameter is read from. |
 | `aws-ssm-parameter` | *(required)* | Absolute SSM path holding the Docker Hub PAT. Not a secret: a path is an address. |
 | `dockerhub-namespace` | *(required)* | Docker Hub namespace every image publishes under. Must be the account the PAT belongs to, which nothing checks. |
-| `trivyignores` | *(none)* | Comma-separated list of relative paths within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml` file. |
-| `vex-documents` | *(none)* | Comma-separated list of relative paths to OpenVEX documents, reaching Trivy as `--vex`. A `not_affected` or `fixed` statement suppresses its finding; `affected` does not. |
-| `vulnerability-gate` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and reports to the job summary on a `pull_request`. The separate wrong-image check is never relaxed. |
+
+#### The config file
+
+```yaml
+# .github/docker-hub-publish.yml
+images:
+  gates:
+    vulnerability: release
+  directories:
+    backend:
+    frontend:
+      trivyignores:
+        - .trivyignore.yaml
+      vex-documents:
+        - frontend.openvex.json
+compose-projects:
+  stack:
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `images.directories` | *(required)* | Mapping keyed by directory, one key per image. Each directory holds a `Dockerfile` and a `docker-bake.hcl`, and publishes to `<namespace>/<repository>-<directory>`. At least one key. |
+| `images.directories.<dir>.trivyignores` | *(none)* | List of `.trivyignore` or `.trivyignore.yaml` files, **one file per element**, applied to this image's scan alone. |
+| `images.directories.<dir>.vex-documents` | *(none)* | List of OpenVEX documents, one file per element, reaching Trivy as `--vex` for this image alone. A `not_affected` or `fixed` statement suppresses its finding; `affected` and `under_investigation` do not. |
+| `images.gates.vulnerability` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and reports to the job summary on a `pull_request`. The separate wrong-image check is never relaxed. |
+| `compose-projects` | *(none)* | Mapping keyed by directory, one key per OCI compose artifact, following the same name formula. Omitted by a repository publishing images alone. |
+
+**Suppression paths resolve against the image's own directory**, and a path that is absolute
+or contains a `..` component is refused. A suppression is a risk acceptance for one image.
+Two images pointing at one file cannot diverge the day one of them is fixed, and the stale
+entry then masks a regression in it silently.
+
+A directory declared twice is a YAML duplicate-key error, which is why both collections are
+mappings rather than lists.
+
+Everything above is validated before any image is built: a named file that is absent, a
+directory missing its `Dockerfile`, or an unrecognised gate value fails the run with a
+message naming the problem.
 
 #### Secrets
 
