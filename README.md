@@ -184,18 +184,16 @@ jobs:
 
 **Pin an exact `@v1.2.3`, not `@v1`.** The IAM trust policy matches the called workflow's
 `job_workflow_ref`, and the recommended pattern admits only immutable exact versions, so a
-`@v1` pin cannot assume the role. This is the one workflow here where the moving tag is
-the wrong choice.
+`@v1` pin cannot assume the role.
 
 #### Requirements
 
-Everything the publishing job touches in AWS has to exist first, and the role's trust
-policy is what denies every other repository. `docs/docker-hub-publish.md` walks it;
-in outline:
+Everything the publishing job touches in AWS must exist first.
+[`docs/docker-hub-publish.md`](docs/docker-hub-publish.md) gives each object in full.
 
 - An **IAM role** whose trust policy matches *both* the calling repository's `sub` claim
-  and this workflow's `job_workflow_ref` claim. Either alone is insufficient — this
-  repository is public, so `job_workflow_ref` on its own would let anyone reach your role.
+  and this workflow's `job_workflow_ref` claim. Either alone is insufficient: this
+  repository is public, so `job_workflow_ref` alone would let any repository reach the role.
 - An **SSM SecureString** holding a Docker Hub PAT with Read & Write, and an inline policy
   granting `ssm:GetParameter` on that one parameter ARN as a literal.
 - **`id-token: write`** on the calling job, as above.
@@ -241,21 +239,18 @@ compose-projects:
 | Key | Default | Description |
 | --- | --- | --- |
 | `images.directories` | *(required)* | Mapping keyed by directory, one key per image. Each directory holds a `Dockerfile` and a `docker-bake.hcl`, and publishes to `<namespace>/<repository>-<directory>`. At least one key. |
-| `images.directories.<dir>.trivyignores` | *(none)* | List of `.trivyignore` or `.trivyignore.yaml` files, **one file per element**, applied to this image's scan alone. |
+| `images.directories.<dir>.trivyignores` | *(none)* | List of `.trivyignore` or `.trivyignore.yaml` files, one file per element, applied to this image's scan alone. |
 | `images.directories.<dir>.vex-documents` | *(none)* | List of OpenVEX documents, one file per element, reaching Trivy as `--vex` for this image alone. A `not_affected` or `fixed` statement suppresses its finding; `affected` and `under_investigation` do not. |
 | `images.gates.vulnerability` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and reports to the job summary on a `pull_request`. The separate wrong-image check is never relaxed. |
-| `compose-projects` | *(none)* | Mapping keyed by directory, one key per OCI compose artifact, following the same name formula. Omitted by a repository publishing images alone. |
+| `compose-projects` | *(none)* | Mapping keyed by directory, one key per OCI compose artifact, publishing to `<namespace>/<repository>-<directory>`. Omitted by a repository publishing images alone. |
 
-**Suppression paths resolve against the image's own directory**, and a path that is absolute
-or contains a `..` component is refused. Two images cannot share one file, so neither keeps a
-stale entry masking a regression once the other is fixed.
+Paths in `trivyignores` and `vex-documents` resolve against the image's own directory. An
+absolute path, a path containing a `..` component and a path containing a comma are each
+refused. `docs/docker-hub-publish.md` covers why a suppression belongs to one image.
 
-A directory declared twice is a YAML duplicate-key error, which is why both collections are
-mappings rather than lists.
+A directory declared twice is a YAML duplicate-key error.
 
-Every key above is validated before any image is built. An absent named file, a directory
-missing its `Dockerfile` and an unrecognised gate value each fail the run with a message
-naming the problem.
+Every key is validated before any image is built, and a failure names the key.
 
 #### Secrets
 
@@ -267,10 +262,9 @@ The workflow declares **no outputs**. What crosses the boundary is what it publi
 
 #### What it does not do
 
-Publishing happens only on a `release` event — the job holding the credential carries
-`if: github.event_name == 'release'`. On a pull request the images are still built,
-scanned and gated and the compose files still validated, so a change that breaks the
-release is caught before the tag exists.
+Publishing happens only on a `release` event: the job holding the credential carries
+`if: github.event_name == 'release'`. On a pull request the images are built, scanned and
+gated and the compose files validated, and nothing is published.
 
 ## Versioning and pinning
 
