@@ -173,7 +173,7 @@ jobs:
       contents: read
       id-token: write
     with:
-      # Omitted: .github/docker-hub-publish.yml is the default. See The config file below.
+      # Optional. Defaults to .github/docker-hub-publish.yml.
       # config: .github/docker-hub-publish.yml
       aws-region: ${{ vars.AWS_REGION }}
       aws-ssm-parameter: /my-project/release/dockerhub-pat
@@ -199,8 +199,8 @@ in outline:
 - An **SSM SecureString** holding a Docker Hub PAT with Read & Write, and an inline policy
   granting `ssm:GetParameter` on that one parameter ARN as a literal.
 - **`id-token: write`** on the calling job, as above.
-- A **config file**, `.github/docker-hub-publish.yml` by default, declaring what the
-  repository publishes. See The config file below.
+- A **config file** declaring what the repository publishes, `.github/docker-hub-publish.yml`
+  by default.
 - Per image directory, a **`Dockerfile`** and a **`docker-bake.hcl` declaring
   `target "image"`**.
 - Per compose directory, a **`compose.yaml` declaring `name: <repository>-<directory>`**,
@@ -210,9 +210,8 @@ in outline:
 
 #### Inputs
 
-The inputs describe the **caller's environment** — where it publishes and how it
-authenticates. What the repository *contains*, and the scan policy applied to it, live in the
-config file below.
+The inputs describe the **caller's environment**. What the repository contains, and the scan
+policy applied to it, live in the config file.
 
 | Input | Default | Description |
 | --- | --- | --- |
@@ -248,16 +247,15 @@ compose-projects:
 | `compose-projects` | *(none)* | Mapping keyed by directory, one key per OCI compose artifact, following the same name formula. Omitted by a repository publishing images alone. |
 
 **Suppression paths resolve against the image's own directory**, and a path that is absolute
-or contains a `..` component is refused. A suppression is a risk acceptance for one image.
-Two images pointing at one file cannot diverge the day one of them is fixed, and the stale
-entry then masks a regression in it silently.
+or contains a `..` component is refused. Two images cannot share one file, so neither keeps a
+stale entry masking a regression once the other is fixed.
 
 A directory declared twice is a YAML duplicate-key error, which is why both collections are
 mappings rather than lists.
 
-Everything above is validated before any image is built: a named file that is absent, a
-directory missing its `Dockerfile`, or an unrecognised gate value fails the run with a
-message naming the problem.
+Every key above is validated before any image is built. An absent named file, a directory
+missing its `Dockerfile` and an unrecognised gate value each fail the run with a message
+naming the problem.
 
 #### Secrets
 

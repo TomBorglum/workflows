@@ -97,13 +97,11 @@ images:
         - .trivyignore.yaml
 ```
 
-**Per image, and that is load-bearing.** A suppression is a risk acceptance for one image,
-and acceptances diverge: a CVE shared by two images is fixed in one of them first. The day
-`frontend` is rebuilt clean, its entry is deleted from `frontend/.trivyignore.yaml` and
-`backend` is untouched. Pointing both images at one shared file makes that impossible
-without splitting the file, and until it is split the stale entry masks a regression in the
-image that was fixed. A path that is absolute or contains a `..` component is refused, so
-the coupling cannot be expressed.
+**Per image.** A CVE shared by two images is fixed in one of them first: the day `frontend`
+is rebuilt clean, its entry is deleted from `frontend/.trivyignore.yaml` and `backend` is
+untouched. One shared file makes that impossible without splitting the file, and until it is
+split the stale entry masks a regression in the image that was fixed. A path that is absolute
+or contains a `..` component is refused, so the coupling cannot be expressed.
 
 Give every suppression an `expired_at` date. On that date Trivy stops honouring the entry
 and the finding fails the release again, so a suppression cannot outlive its reason by
@@ -136,16 +134,14 @@ images:
     vulnerability: release
 ```
 
-It is nested under `images:` because it governs image scans and nothing else scans today.
-It is not an input, because the inputs describe the caller's environment while the config
-file holds what the repository contains and the policy applied to it — so a second gate,
-should another scanner ever be added, is one more key here rather than one more input.
+It is nested under `images:` because it governs image scans and nothing else is scanned. A
+second gate, should another scanner be added, is one more key here rather than one more
+input.
 
 `release` is for a repository that will not have a pull request blocked by drift in a base
 image its author does not control: a base whose packages have a published fix the upstream
-image has not been rebuilt with produces findings on every pull request, including ones
-that change nothing near an image, and the contributor cannot act on any of them. The
-publish is where the decision actually gets made, so that is where the block belongs.
+image has not been rebuilt with produces findings on every pull request, including ones that
+change nothing near an image, and the contributor cannot act on any of them.
 
 **The wrong-image check is never relaxed**, under either value. Relaxing it would let a
 broken scan read as a clean image.

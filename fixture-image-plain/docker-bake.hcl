@@ -1,12 +1,12 @@
-# What the fixture image IS, declared beside it exactly as a caller declares its own.
+# What the fixture image is, declared beside it as a caller declares its own.
 # docker-hub-publish.yml passes `source: fixture-image-plain` and loads this file, so paths
-# resolve against THIS directory.
+# resolve against this directory.
 
 # The target name is fixed by the workflow: its `bake-target: image` and `targets: image`
 # both name `image`, and a bake file declaring anything else fails the build.
 target "image" {
   # `.` rather than `..`, unlike a real service: a context that leaves this directory
-  # needs `--allow=fs.read=..`, and a fixture has no reason to need it.
+  # needs `--allow=fs.read=..`.
   context    = "."
   dockerfile = "Dockerfile"
 
