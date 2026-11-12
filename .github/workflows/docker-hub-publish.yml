@@ -83,25 +83,23 @@ on:
         type: string
       scan-gate:
         description: >-
-          WHEN THE FINDINGS ASSERTION BLOCKS. `always`, the default, fails every caller
-          event, which is what every release before this input existed did. `release`
-          fails a release and, on a pull_request, writes the findings to the job summary
-          and passes instead - for a repository that will not have a pull request blocked
-          by drift in a base image its author does not control, the publish being where
-          the decision actually gets made. Validated in the `images` step. THE IDENTITY
-          ASSERTION IS NEVER SOFTENED by either value: it catches trivy scanning something
-          other than the image, which is a bug and not a finding.
+          Which caller events the findings assertion fails. `always`, the default, fails
+          every event, as this workflow did before the input existed. `release` fails a
+          release. On a pull_request it writes the findings to the job summary and passes.
+          Validated in the `images` step, so an unrecognised value fails before any image
+          is built. Only the findings assertion is conditional; the identity assertion
+          ignores this input. docs/docker-hub-publish.md says when to pass `release`.
         required: false
         default: always
         type: string
       vex:
         description: >-
           Comma-separated list of relative paths within the repository to OpenVEX
-          documents, reaching trivy as --vex. Spelled like `trivyignores` above and
-          applied to every image scan the same way. A `not_affected` or `fixed` statement
-          suppresses its finding and an `affected` or `under_investigation` one does not,
-          so recording a reachable finding here does not hide it from the gate. Empty by
-          default, which applies no VEX at all.
+          documents, reaching trivy as --vex. Spelled like `trivyignores` above, and
+          applied to every image scan. A `not_affected` or `fixed` statement suppresses
+          its finding. An `affected` or `under_investigation` one does not, so a reachable
+          finding recorded here still reaches the gate. Empty by default, which applies no
+          VEX at all.
         required: false
         default: ''
         type: string
