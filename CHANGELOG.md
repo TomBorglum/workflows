@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/TomBorglum/workflows/compare/v1.1.1...v1.2.0) (2026-11-12)
+
+
+### Features
+
+* **docker-hub-publish:** add vulnerability-gate and vex-documents inputs ([#19](https://github.com/TomBorglum/workflows/issues/19)) ([5b19b36](https://github.com/TomBorglum/workflows/commit/5b19b36f7c14ff00b80d7fde8f52b530a4879f6d))
+
+
+### Dependencies
+
+* Bump the actions group with 2 updates ([#17](https://github.com/TomBorglum/workflows/issues/17)) ([4108da3](https://github.com/TomBorglum/workflows/commit/4108da3e009cd9ab71076ef5526a22080eb2057b))
+
 ## [1.1.1](https://github.com/TomBorglum/workflows/compare/v1.1.0...v1.1.1) (2026-11-05)
 
 
