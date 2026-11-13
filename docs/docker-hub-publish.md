@@ -87,9 +87,9 @@ A **HIGH or CRITICAL** Trivy finding in any image.
 
 Suppressions go in a **`trivyignores`** list under that image's own directory in the config
 file: `.trivyignore` or `.trivyignore.yaml` files, one file per element, resolved against
-the image directory. At most one element may be YAML-format. `--ignorefile` takes a single
-path, and `trivy-action` concatenates plain-format files only, so a second `.yaml` or `.yml`
-entry would be accepted and then silently suppress nothing.
+the image directory. At most one element may be YAML-format: `--ignorefile` takes a single
+path and `trivy-action` concatenates plain-format files only, so a second `.yaml` or `.yml`
+entry would suppress nothing.
 
 ```yaml
 images:

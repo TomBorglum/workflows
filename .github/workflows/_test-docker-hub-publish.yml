@@ -36,10 +36,9 @@ name: docker-hub-publish test
 #
 # `images.gates` is left out of the config file, asserting the `always` default.
 #
-# The `schema` job tests schema/docker-hub-publish.json on its own, independently of a build.
-# It checks the schema against its metaschema, then validates every file in
-# .github/fixtures/schema-rejects/ and fails if any is accepted. A schema's whole job is
-# refusing things: a rule weakened by a later edit leaves every other test here green.
+# The `schema` job tests schema/docker-hub-publish.json independently of a build. A schema's
+# whole job is refusing things, and a rule weakened by a later edit leaves every other test
+# here green.
 #
 # The `release` branch of the vulnerability gate is not covered here and cannot be. It needs an
 # image carrying HIGH or CRITICAL findings, while fixture-image is FROM scratch precisely so
@@ -60,8 +59,8 @@ permissions:
   contents: read
 
 jobs:
-  # The schema alone, so a broken schema or a weakened rule fails in seconds rather than
-  # after the image builds - and fails even when the valid config still happens to pass.
+  # Fails in seconds rather than after the image builds, and fails even when the valid
+  # config still happens to pass.
   schema:
     runs-on: ubuntu-latest
     steps:
@@ -69,27 +68,24 @@ jobs:
         with:
           persist-credentials: false
 
-      # The same workspace and the same action docker-hub-publish.yml uses, so this job
-      # tests the validator consumers actually get. `working-directory` defaults to '.',
-      # which is where this repository's .envrc and pixi.toml live.
+      # The same workspace docker-hub-publish.yml uses, so this tests the validator
+      # consumers get.
       - name: Provide the config validator
         uses: TomBorglum/actions/direnv/setup@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
 
-      # A schema that is itself invalid is accepted by nothing, so every consumer's run
-      # breaks at once. Checked before it is used to validate anything.
+      # An invalid schema accepts nothing, so every consumer's run breaks at once.
       - name: Check the schema against its metaschema
         run: check-jsonschema --check-metaschema schema/docker-hub-publish.json
 
-      # The same file `call` below passes, validated here too: this reports a schema fault
-      # as a schema fault rather than as a failed build.
+      # The file `call` below passes, so a schema fault reports as a schema fault rather
+      # than as a failed build.
       - name: The schema accepts this repository's own config
         run: |
           check-jsonschema --schemafile schema/docker-hub-publish.json \
             .github/fixtures/docker-hub-publish.yml
 
-      # Every fixture must fail. One that passes is a rule that stopped holding, which no
-      # other job here can see. .github/fixtures/schema-rejects/README.md records the rule
-      # each file covers.
+      # A fixture that passes is a rule that stopped holding, which no other job here can
+      # see. schema-rejects/README.md records the rule each file covers.
       - name: The schema refuses every rejection fixture
         run: |
           set -euo pipefail

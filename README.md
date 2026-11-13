@@ -242,12 +242,11 @@ A directory declared twice is a YAML duplicate-key error.
 #### Validating the config file
 
 [`schema/docker-hub-publish.json`](schema/docker-hub-publish.json) is a JSON Schema
-(draft 2020-12) describing every key above. The workflow validates the config file against
-it in `meta`, before any image is built, using the copy of the schema belonging to the
-version the caller pinned. A failure is reported as an annotation on the config file naming
-the key that failed.
+(draft 2020-12) describing every key above. `meta` validates the config file against it
+before any image is built, using the copy belonging to the version the caller pinned. A
+failure is an annotation on the config file naming the key that failed.
 
-Reference the same schema from the config file to get those errors in an editor instead:
+Reference the same schema from the config file for those errors in an editor:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/TomBorglum/workflows/v2.0.0/schema/docker-hub-publish.json
@@ -256,10 +255,10 @@ images:
     backend:
 ```
 
-Pin the tag the `uses:` line pins. The modeline is read by the YAML language server, which
-VS Code, Neovim and the JetBrains IDEs all use; it has no effect on the workflow itself.
+Pin the tag the `uses:` line pins. The modeline is read by the YAML language server and has
+no effect on the workflow.
 
-To run the same check locally, with the validator this repository pins:
+To run the same check locally:
 
 ```bash
 pixi run check-jsonschema \
@@ -267,16 +266,13 @@ pixi run check-jsonschema \
   .github/docker-hub-publish.yml
 ```
 
-The validator is declared in this repository's `pixi.toml` and pinned by `pixi.lock`, and
-`.envrc` pins the pixi that installs it. `meta` provides it with
-`TomBorglum/actions/direnv/setup`, so the binary the workflow runs is the binary a
-maintainer runs. `update-pixi-dependencies.yml` bumps it, because Dependabot has no pixi
-ecosystem.
+`pixi.toml` declares the validator and `pixi.lock` pins it, so `pixi run` and `meta` run the
+same binary. `update-pixi-dependencies.yml` bumps it.
 
 Unknown keys are refused, so a misspelt key fails the run rather than silently applying
-nothing. What the schema cannot check is the filesystem: that a declared directory exists,
-that it holds a `Dockerfile` and a `docker-bake.hcl`, and that a named suppression file is
-present. The workflow checks those separately, also before any image is built.
+nothing. The schema cannot check the filesystem: that a declared directory exists, that it
+holds a `Dockerfile` and a `docker-bake.hcl`, and that a named suppression file is present.
+The workflow checks those separately, also before any image is built.
 
 #### Secrets
 

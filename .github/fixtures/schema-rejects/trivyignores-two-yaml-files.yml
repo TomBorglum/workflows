@@ -1,5 +1,5 @@
-# maxContains. `--ignorefile` takes a single path and trivy-action concatenates plain-format
-# files only, so the second YAML-format file would silently not apply.
+# `--ignorefile` takes a single path and trivy-action concatenates plain-format files only,
+# so the second YAML-format file would silently not apply.
 images:
   directories:
     fixture-image:

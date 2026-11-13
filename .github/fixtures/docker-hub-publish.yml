@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../schema/docker-hub-publish.json
 #
-# The relative path, not the raw URL a consumer uses: editing this file and the schema in the
-# same working tree must validate against the schema in that tree, not against a released tag.
+# A relative path, not the raw URL a consumer pins: this file and the schema change together,
+# so it must validate against the working tree rather than a released tag.
 #
 # The config fixture _test-docker-hub-publish.yml runs docker-hub-publish.yml against. This
 # repository publishes nothing; every directory named here is a build fixture.

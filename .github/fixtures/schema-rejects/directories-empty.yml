@@ -1,4 +1,3 @@
-# minProperties. An empty mapping parses, and `fromJSON` on `[]` gives a matrix with no legs,
-# so the run would succeed having published nothing.
+# An empty mapping parses, and a build matrix with no legs succeeds having published nothing.
 images:
   directories: {}

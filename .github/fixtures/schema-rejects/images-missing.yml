@@ -1,4 +1,3 @@
-# `images` is required: a config declaring compose projects alone builds no image, and the
-# build matrix would resolve empty.
+# A config declaring compose projects alone builds no image, and the matrix resolves empty.
 compose-projects:
   fixture-compose:

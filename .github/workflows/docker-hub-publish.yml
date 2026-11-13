@@ -22,9 +22,7 @@ name: Docker Hub publish
 # must never be added to make it resolve. A composite action appears in no OIDC claim, so the
 # role's trust policy pins this file's `job_workflow_ref` on a `v*.*.*` tag.
 #
-# `meta` uses a second action from the same repository and the same pin,
-# TomBorglum/actions/direnv/setup, to provide the config validator from this workflow's own
-# pixi workspace. The action-cache rule above holds for it too: `meta` does check the
+# The same holds for TomBorglum/actions/direnv/setup in `meta`: `meta` does check the
 # repository out, but neither action resolves from that checkout.
 
 # Every `github.*` reference below resolves to the caller's event. The caller carries the
@@ -114,16 +112,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # This workflow's own source, for the schema the config file is validated against.
-      # `actions/checkout` inside a called workflow checks out the caller, so the repository
-      # and ref are explicit. `job.workflow_sha` is the commit of the workflow running, so a
-      # caller pinned to @v2.0.0 validates against v2.0.0's schema and there is no version
-      # skew to manage. `job.workflow_*` is unavailable on GitHub Enterprise Server; this
-      # repository targets github.com.
+      # This workflow's own source, for the schema and the validator. `actions/checkout`
+      # inside a called workflow checks out the caller, hence the explicit repository and
+      # ref: `job.workflow_sha` is the commit of the workflow running, so a caller pinned to
+      # @v2.0.0 validates against v2.0.0's schema. `job.workflow_*` is unavailable on GitHub
+      # Enterprise Server; this repository targets github.com.
       #
-      # Nothing in this checkout is executed. The schema is data read by the validator, and
-      # the pixi workspace beside it declares that validator - neither is a script from this
-      # tree.
+      # Nothing in this checkout is executed.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
@@ -131,28 +126,18 @@ jobs:
           path: workflow-source
           persist-credentials: false
 
-      # The validator, out of this workflow's own pixi workspace in the checkout above.
-      # The .envrc there pins pixi, pixi.lock pins every package by version and sha256, and
-      # `use pixi` runs `pixi install --locked`, which aborts when the lock and the manifest
-      # disagree. Nothing is fetched at a floating version, and the action installs no
-      # toolchain of its own - it evaluates the .envrc and exports what that declares.
-      #
-      # pixi rather than pip: it is how every repository in this ecosystem provides Python,
-      # and update-pixi-dependencies.yml in this repository is what bumps it. Dependabot has
-      # no pixi ecosystem, which is that workflow's whole reason for existing.
+      # From the pixi workspace in the checkout above, never the runner image. pixi.toml
+      # records why pixi and what bumps it.
       - name: Provide the config validator
         uses: TomBorglum/actions/direnv/setup@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
         with:
           working-directory: workflow-source
 
-      # Shape, before anything reads through it: required keys, unknown keys, enums, path
-      # patterns, and the rule that at most one trivyignores element may be YAML-format.
-      # The `images` step below keeps only the checks a schema cannot make, which are the
-      # ones about the filesystem.
+      # Shape, before anything reads through it. The `images` step below keeps only the
+      # checks a schema cannot make, which are the ones about the filesystem.
       #
-      # The schema comes from the checkout above rather than over the network: a caller
-      # pinned to a version must validate against that version's schema, and a fetch would
-      # let a schema change break a pinned caller.
+      # The schema is read from the checkout rather than fetched: a caller pinned to a
+      # version must validate against that version's schema.
       - name: Validate the config against the schema
         env:
           CONFIG: ${{ inputs.config }}
@@ -163,10 +148,9 @@ jobs:
             exit 1
           fi
 
-          # -o json, so each error becomes one annotation against the config file in the
-          # pull request's own diff rather than a line in a log nobody opens. The validator
-          # reports a JSON path and not a line number, so the path travels in the message
-          # and `line` keeps its default of 1.
+          # -o json, so each error becomes one annotation on the config file. The validator
+          # reports a JSON path and no line number, so the path travels in the message and
+          # `line` keeps its default of 1.
           if check-jsonschema -o json \
             --schemafile workflow-source/schema/docker-hub-publish.json \
             "$CONFIG" > /tmp/validation.json; then
@@ -174,8 +158,7 @@ jobs:
             exit 0
           fi
 
-          # A crash rather than a validation failure writes nothing jq can read, and that
-          # must not surface as "no errors found".
+          # A crash writes nothing jq can read, which must not surface as "no errors found".
           if ! jq -e 'type == "object"' /tmp/validation.json > /dev/null 2>&1; then
             echo "::error::check-jsonschema produced no readable result for $CONFIG"
             cat /tmp/validation.json
@@ -205,8 +188,8 @@ jobs:
           fail() { echo "::error::$1"; exit 1; }
 
           # `required` is satisfied by a key being present, and an unset variable reaches
-          # a called workflow as an empty string. Checked here rather than in the schema
-          # because it is an input: the schema governs the config file alone.
+          # a called workflow as an empty string. Not in the schema: it is an input, and the
+          # schema governs the config file alone.
           if [[ ! "$DOCKERHUB_NAMESPACE" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
             fail "dockerhub-namespace must be lowercase letters, digits, - or _, got: '$DOCKERHUB_NAMESPACE'"
           fi
@@ -214,8 +197,8 @@ jobs:
           # A missing binary would otherwise surface as a jq parse error on an empty file.
           command -v yq > /dev/null || fail "yq is not on PATH"
           # One conversion, so every read below is jq on JSON rather than two query
-          # languages. The file exists and its shape is already validated: the two steps
-          # above checked both, so nothing here re-checks a type or an enum.
+          # languages. The shape is already validated above, so nothing here re-checks a
+          # type or an enum.
           yq -o=json '.' "$CONFIG" > /tmp/config.json
 
           # `keys_unsorted`, so the file's order is the matrix's order. A directory declared
@@ -225,10 +208,9 @@ jobs:
           jq -r '.["compose-projects"] // {} | keys_unsorted[]' /tmp/config.json \
             > /tmp/compose-directories
 
-          # What the schema cannot know: the filesystem. A declared directory may not exist,
-          # may hold no build files, and a named suppression file may be absent. Checked
-          # before any image is built, because a mistyped suppression path reaching the scan
-          # would be a suppression that silently does not load.
+          # What the schema cannot know: the filesystem. Checked before any image is built,
+          # because a mistyped suppression path reaching the scan would be a suppression
+          # that silently does not load.
           while read -r directory; do
             [ -d "$directory" ] || fail "images.directories.$directory: no such directory"
             for required in Dockerfile docker-bake.hcl; do
@@ -236,8 +218,7 @@ jobs:
                 || fail "images.directories.$directory: $directory/$required not found"
             done
             for key in trivyignores vex-documents; do
-              # `// []` covers both a directory declaring nothing, which is null here, and
-              # a directory declaring the other key only.
+              # `// []` covers a directory declaring nothing, which is null here.
               jq -r --arg d "$directory" --arg k "$key" \
                 '((.images.directories[$d] // {})[$k] // [])[]' /tmp/config.json \
                 > /tmp/suppression-paths
@@ -255,8 +236,7 @@ jobs:
               || fail "compose-projects.$directory: $directory/compose.yaml not found"
           done < /tmp/compose-directories
 
-          # Read rather than checked: the schema has already refused every other value. The
-          # default lives here because an absent key has to resolve to something.
+          # Read rather than checked: the schema has already refused every other value.
           gate="$(jq -r '.images.gates.vulnerability // "always"' /tmp/config.json)"
           printf 'vulnerability-gate=%s\n' "$gate" >> "$GITHUB_OUTPUT"
 

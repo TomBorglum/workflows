@@ -1,6 +1,2 @@
-# The environment pixi installs from pixi.lock. The lockfile is committed; the environment
-# it produces is not.
 .pixi/
-
-# direnv's own cache of an evaluated .envrc.
 .direnv/

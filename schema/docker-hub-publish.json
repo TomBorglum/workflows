@@ -2,32 +2,46 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/TomBorglum/workflows/main/schema/docker-hub-publish.json",
   "title": "docker-hub-publish config",
-  "description": "The file docker-hub-publish.yml reads through its `config` input. It declares what the calling repository publishes and the scan policy applied to it. The workflow's own inputs describe the caller's environment instead. README.md documents every key.\n\nThe workflow validates the caller's file against this schema in its `meta` job, before any image is built, using the copy of this file that belongs to the pinned version the caller called. Reference it from the config file as well to get the same errors in an editor:\n\n    # yaml-language-server: $schema=https://raw.githubusercontent.com/TomBorglum/workflows/v2.0.0/schema/docker-hub-publish.json\n\nWhat this schema cannot check is the filesystem: that a declared directory exists, that it holds a Dockerfile and a docker-bake.hcl, and that a named suppression file is present. The workflow checks those separately in the same step.",
+  "description": "The file docker-hub-publish.yml reads through its `config` input. It declares what the calling repository publishes and the scan policy applied to it; the workflow's own inputs describe the caller's environment. README.md documents every key and the modeline that reaches this schema from an editor.\n\nThe workflow validates the caller's file against the copy of this schema belonging to the version the caller pinned. It checks the filesystem separately: that a declared directory exists, that it holds a Dockerfile and a docker-bake.hcl, and that a named suppression file is present.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["images"],
+  "required": [
+    "images"
+  ],
   "properties": {
     "images": {
       "description": "Every image this repository publishes, and the gates applied to them.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["directories"],
+      "required": [
+        "directories"
+      ],
       "properties": {
         "directories": {
           "description": "One key per image, keyed by the directory holding it. Each publishes to <namespace>/<repository>-<directory>. The file's order is the build matrix's order.",
           "type": "object",
           "minProperties": 1,
-          "propertyNames": { "$ref": "#/$defs/directoryName" },
-          "additionalProperties": { "$ref": "#/$defs/imageDirectory" }
+          "propertyNames": {
+            "$ref": "#/$defs/directoryName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/imageDirectory"
+          }
         },
         "gates": {
-          "description": "Which caller events a finding fails. Placed here because it governs every image.",
-          "type": ["object", "null"],
+          "description": "Gates applied to every image.",
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "properties": {
             "vulnerability": {
-              "description": "`always` fails any event on a HIGH or CRITICAL finding. `release` fails a release and reports to the job summary on a pull_request. The separate wrong-image check is never relaxed by either value.",
-              "enum": ["always", "release"]
+              "description": "`always` fails any event on a HIGH or CRITICAL finding. `release` fails a release and reports to the job summary on a pull_request. Neither value relaxes the separate wrong-image check.",
+              "enum": [
+                "always",
+                "release"
+              ]
             }
           }
         }
@@ -35,11 +49,19 @@
     },
     "compose-projects": {
       "description": "One key per OCI compose artifact, keyed by the directory holding its compose.yaml. Each publishes to <namespace>/<repository>-<directory>. Omitted by a repository publishing images alone.",
-      "type": ["object", "null"],
-      "propertyNames": { "$ref": "#/$defs/directoryName" },
+      "type": [
+        "object",
+        "null"
+      ],
+      "propertyNames": {
+        "$ref": "#/$defs/directoryName"
+      },
       "additionalProperties": {
-        "description": "Nothing to declare per project yet. A mapping is reserved for one key being added without a breaking change.",
-        "type": ["object", "null"],
+        "description": "A mapping is reserved so a per-project key can be added without a breaking change.",
+        "type": [
+          "object",
+          "null"
+        ],
         "additionalProperties": false,
         "properties": {}
       }
@@ -47,19 +69,24 @@
   },
   "$defs": {
     "directoryName": {
-      "description": "A single path component directly under the repository root. Not nested: a nested compose project composes a three-component Docker Hub repository, and a nested image directory produces an artifact name containing a slash, which upload-artifact refuses. Leading `.` and `..` are excluded by the same pattern.",
+      "description": "A single path component directly under the repository root. A nested compose project composes a three-component Docker Hub repository; a nested image directory produces an artifact name containing a slash, which upload-artifact refuses. The pattern excludes `.` and `..` with it.",
       "type": "string",
       "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*$"
     },
     "imageDirectory": {
-      "description": "One image. Empty when it declares no suppressions, which in YAML is `backend:` with no value and reaches here as null.",
-      "type": ["object", "null"],
+      "description": "One image. Empty when it declares no suppressions, which reaches here as null.",
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
       "properties": {
         "trivyignores": {
-          "description": "Trivy ignore files applied to this image's scan alone, reaching the scan as --ignorefile. One file per element. At most one may be YAML-format: --ignorefile takes a single path, and trivy-action concatenates plain-format files only, so a second YAML file would silently not apply.",
+          "description": "Trivy ignore files applied to this image's scan alone, reaching it as --ignorefile. One file per element. At most one may be YAML-format: --ignorefile takes a single path and trivy-action concatenates plain-format files only, so a second YAML file would silently not apply.",
           "type": "array",
-          "items": { "$ref": "#/$defs/suppressionPath" },
+          "items": {
+            "$ref": "#/$defs/suppressionPath"
+          },
           "contains": {
             "$comment": "minContains 0, because `contains` alone would require a YAML-format file rather than permitting one.",
             "pattern": "\\.ya?ml$"
@@ -70,17 +97,19 @@
         "vex-documents": {
           "description": "OpenVEX documents reaching Trivy as --vex for this image alone. A `not_affected` or `fixed` statement suppresses its finding; `affected` and `under_investigation` do not.",
           "type": "array",
-          "items": { "$ref": "#/$defs/suppressionPath" }
+          "items": {
+            "$ref": "#/$defs/suppressionPath"
+          }
         }
       }
     },
     "suppressionPath": {
-      "description": "One file, relative to the image's own directory. Reaching outside that directory is refused so that two images cannot share one risk acceptance: an acceptance has to be able to diverge when one of the images is fixed and the other is not.",
+      "description": "One file, relative to the image's own directory. Reaching outside it is refused so two images cannot share one risk acceptance, which has to be able to diverge when one image is fixed and the other is not.",
       "type": "string",
       "minLength": 1,
       "allOf": [
         {
-          "$comment": "Relative to the image directory, so not absolute.",
+          "$comment": "Not absolute.",
           "pattern": "^[^/]"
         },
         {
@@ -88,12 +117,16 @@
           "pattern": "[^/]$"
         },
         {
-          "$comment": "One file per element. The list is comma-joined for trivy, which splits on the comma, so an element carrying one would silently become two paths.",
-          "not": { "pattern": "," }
+          "$comment": "The list is comma-joined for trivy, which splits on the comma.",
+          "not": {
+            "pattern": ","
+          }
         },
         {
-          "$comment": "Matched as a whole path component, so a file named `v1..2` is not refused.",
-          "not": { "pattern": "(^|/)\\.\\.(/|$)" }
+          "$comment": "A whole path component, so a file named `v1..2` is not refused.",
+          "not": {
+            "pattern": "(^|/)\\.\\.(/|$)"
+          }
         }
       ]
     }

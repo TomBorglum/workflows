@@ -1,5 +1,4 @@
-# The gate enum. An unrecognised value gates nothing: `meta` reads the key through and the
-# comparison in `build` matches neither branch.
+# An unrecognised value gates nothing: the comparison in `build` matches neither branch.
 images:
   gates:
     vulnerability: sometimes

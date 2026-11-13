@@ -1,4 +1,4 @@
-# additionalProperties at the top level. A misspelt section is otherwise a silent no-op.
+# A misspelt section is otherwise a silent no-op.
 images:
   directories:
     fixture-image:
