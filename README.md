@@ -157,7 +157,7 @@ concurrency:
 
 jobs:
   images:
-    uses: TomBorglum/workflows/.github/workflows/docker-hub-publish.yml@v2.0.0
+    uses: TomBorglum/workflows/.github/workflows/docker-hub-publish.yml@v2.0.1
     permissions:
       contents: read
       id-token: write
@@ -222,7 +222,8 @@ images:
       vex-documents:
         - frontend.openvex.json
 compose-projects:
-  stack:
+  directories:
+    stack:
 ```
 
 | Key | Default | Description |
@@ -231,7 +232,7 @@ compose-projects:
 | `images.directories.<dir>.trivyignores` | *(none)* | List of `.trivyignore` or `.trivyignore.yaml` files, one file per element, applied to this image's scan alone. At most one element may be YAML-format: `--ignorefile` takes a single path, and Trivy concatenates plain-format files only, so a second `.yaml` or `.yml` entry would silently not apply. |
 | `images.directories.<dir>.vex-documents` | *(none)* | List of OpenVEX documents, one file per element, reaching Trivy as `--vex` for this image alone. A `not_affected` or `fixed` statement suppresses its finding; `affected` and `under_investigation` do not. |
 | `images.gates.vulnerability` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and warns on a `pull_request`. Reporting is unconditional either way: every event writes each image's findings and suppressed findings to the job summary. The separate wrong-image check is never relaxed. |
-| `compose-projects` | *(none)* | Mapping keyed by directory, one key per OCI compose artifact, publishing to `<namespace>/<repository>-<directory>`. Omitted by a repository publishing images alone. |
+| `compose-projects.directories` | *(none)* | Mapping keyed by directory, one key per OCI compose artifact, publishing to `<namespace>/<repository>-<directory>`. Keyed as `images.directories` is, and required when `compose-projects` is present. At least one key. Omitted, with its section, by a repository publishing images alone. |
 
 Paths in `trivyignores` and `vex-documents` resolve against the image's own directory. An
 absolute path, a path containing a `..` component and a path containing a comma are each
@@ -252,7 +253,7 @@ failure is an annotation on the config file naming the key that failed.
 Reference the same schema from the config file for those errors in an editor:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/TomBorglum/workflows/v2.0.0/schema/docker-hub-publish.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/TomBorglum/workflows/v2.0.1/schema/docker-hub-publish.json
 images:
   directories:
     backend:
@@ -265,7 +266,7 @@ To run the same check locally:
 
 ```bash
 pixi run check-jsonschema \
-  --schemafile https://raw.githubusercontent.com/TomBorglum/workflows/v2.0.0/schema/docker-hub-publish.json \
+  --schemafile https://raw.githubusercontent.com/TomBorglum/workflows/v2.0.1/schema/docker-hub-publish.json \
   .github/docker-hub-publish.yml
 ```
 

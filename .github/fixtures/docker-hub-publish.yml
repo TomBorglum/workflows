@@ -25,4 +25,5 @@ images:
     fixture-image-plain:
 
 compose-projects:
-  fixture-compose:
+  directories:
+    fixture-compose:

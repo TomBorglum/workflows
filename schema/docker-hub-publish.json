@@ -48,22 +48,30 @@
       }
     },
     "compose-projects": {
-      "description": "One key per OCI compose artifact, keyed by the directory holding its compose.yaml. Each publishes to <namespace>/<repository>-<directory>. Omitted by a repository publishing images alone.",
-      "type": [
-        "object",
-        "null"
+      "description": "Every OCI compose artifact this repository publishes. Omitted by a repository publishing images alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directories"
       ],
-      "propertyNames": {
-        "$ref": "#/$defs/directoryName"
-      },
-      "additionalProperties": {
-        "description": "A mapping is reserved so a per-project key can be added without a breaking change.",
-        "type": [
-          "object",
-          "null"
-        ],
-        "additionalProperties": false,
-        "properties": {}
+      "properties": {
+        "directories": {
+          "description": "One key per OCI compose artifact, keyed by the directory holding its compose.yaml. Each publishes to <namespace>/<repository>-<directory>.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/directoryName"
+          },
+          "additionalProperties": {
+            "description": "A mapping is reserved so a per-project key can be added without a breaking change.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {}
+          }
+        }
       }
     }
   },

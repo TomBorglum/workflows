@@ -1,0 +1,6 @@
+# `directories:` is where every compose project is named, matching `images:`. Without it the
+# section declares nothing.
+images:
+  directories:
+    fixture-image:
+compose-projects: {}

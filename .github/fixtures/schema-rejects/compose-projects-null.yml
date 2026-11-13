@@ -1,0 +1,6 @@
+# A section present and empty. The key reads as a declaration while naming no project, which
+# is the shape `directories:` exists to rule out.
+images:
+  directories:
+    fixture-image:
+compose-projects:

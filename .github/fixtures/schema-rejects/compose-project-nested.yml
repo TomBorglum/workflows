@@ -4,4 +4,5 @@ images:
   directories:
     fixture-image:
 compose-projects:
-  stacks/fixture-compose:
+  directories:
+    stacks/fixture-compose:

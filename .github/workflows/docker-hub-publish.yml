@@ -170,7 +170,7 @@ jobs:
           # `keys_unsorted`, so the file's order is the matrix's order. Duplicate keys are a
           # YAML error, which is why both collections are mappings rather than lists.
           jq -r '.images.directories | keys_unsorted[]' /tmp/config.json > /tmp/image-directories
-          jq -r '.["compose-projects"] // {} | keys_unsorted[]' /tmp/config.json \
+          jq -r '.["compose-projects"].directories // {} | keys_unsorted[]' /tmp/config.json \
             > /tmp/compose-directories
 
           # What the schema cannot know: the filesystem. Before any image is built, because a
@@ -195,9 +195,9 @@ jobs:
 
           while read -r directory; do
             [ -n "$directory" ] || continue
-            [ -d "$directory" ] || fail "compose-projects.$directory: no such directory"
+            [ -d "$directory" ] || fail "compose-projects.directories.$directory: no such directory"
             [ -f "$directory/compose.yaml" ] \
-              || fail "compose-projects.$directory: $directory/compose.yaml not found"
+              || fail "compose-projects.directories.$directory: $directory/compose.yaml not found"
           done < /tmp/compose-directories
 
           # Read rather than checked: the schema has already refused every other value.
@@ -212,7 +212,7 @@ jobs:
           # string is not set at all, and `fromJSON` on an unset output fails the run.
           jq -c '.images.directories | keys_unsorted' /tmp/config.json \
             | sed 's/^/image-directories=/' >> "$GITHUB_OUTPUT"
-          jq -c '.["compose-projects"] // {} | keys_unsorted' /tmp/config.json \
+          jq -c '.["compose-projects"].directories // {} | keys_unsorted' /tmp/config.json \
             | sed 's/^/compose-directories=/' >> "$GITHUB_OUTPUT"
 
           # Each image's own paths, prefixed with its directory because that is what they
@@ -236,16 +236,16 @@ jobs:
           jq -c --arg p "$prefix" '.images.directories | keys_unsorted
             | map({key: ., value: "\($p)-\(.)"}) | from_entries' \
             /tmp/config.json | sed 's/^/image-map=/' >> "$GITHUB_OUTPUT"
-          jq -r --arg p "$prefix" '.["compose-projects"] // {} | keys_unsorted
+          jq -r --arg p "$prefix" '.["compose-projects"].directories // {} | keys_unsorted
             | map("\($p)-\(.)") | join(",")' \
             /tmp/config.json | sed 's/^/compose-list=/' >> "$GITHUB_OUTPUT"
-          jq -c --arg p "$prefix" '.["compose-projects"] // {} | keys_unsorted
+          jq -c --arg p "$prefix" '.["compose-projects"].directories // {} | keys_unsorted
             | map({key: ., value: "\($p)-\(.)"}) | from_entries' \
             /tmp/config.json | sed 's/^/compose-map=/' >> "$GITHUB_OUTPUT"
 
           jq -r --arg p "$prefix" '
             [(.images.directories | keys_unsorted[]),
-             (.["compose-projects"] // {} | keys_unsorted[])][]
+             (.["compose-projects"].directories // {} | keys_unsorted[])][]
             | "\(.) -> \($p)-\(.)"' /tmp/config.json
 
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0

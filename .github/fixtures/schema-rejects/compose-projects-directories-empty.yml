@@ -1,0 +1,6 @@
+# An empty mapping parses, and the compose job is skipped having published nothing.
+images:
+  directories:
+    fixture-image:
+compose-projects:
+  directories: {}
