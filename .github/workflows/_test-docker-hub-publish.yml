@@ -8,8 +8,7 @@ name: docker-hub-publish test
 #
 # Every fixture is a top-level directory, forced twice over: the compose job refuses a nested
 # directory, and the build job's artifact is named `image-<directory>`, which upload-artifact
-# rejects if the name contains a slash. Moving any fixture under test/ breaks this test in two
-# places.
+# rejects if the name contains a slash. Nesting a fixture breaks this test in two places.
 #
 # The workflow declares no workflow_call outputs, so there is nothing to assert the way
 # _test-update-pixi-dependencies.yml asserts its own. What crosses the boundary are the two
