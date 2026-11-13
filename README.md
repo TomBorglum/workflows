@@ -6,17 +6,6 @@ Companion to [TomBorglum/actions](https://github.com/TomBorglum/actions), which
 publishes composite *actions* (steps you drop into a job). This repository publishes
 reusable *workflows* — whole jobs you call instead of writing.
 
-A reusable workflow is called at the **job** level, not as a step:
-
-```yaml
-jobs:
-  ci:
-    uses: TomBorglum/workflows/.github/workflows/node-ci.yml@v1
-    with:
-      node-version: "22"
-    secrets: inherit
-```
-
 ## Workflows
 
 | Workflow | Purpose |
