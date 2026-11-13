@@ -1,40 +1,24 @@
 name: Release Please
 
-# This repository's own CI, not a reusable workflow - hence the leading underscore.
+# Authenticates as the tomborglum-workflows-bot GitHub App, never with GITHUB_TOKEN: an
+# event created with GITHUB_TOKEN triggers no further workflow run, so the release pull
+# request would never run the required SonarCloud gate and could never satisfy
+# main-protection.
 #
-# Automates releases. On every push to main, release-please opens (or updates) a
-# single "chore: release X.Y.Z" PR that bumps CHANGELOG.md and the version manifest
-# from the Conventional Commit messages since the last tag. Merging that PR creates
-# the git tag and the GitHub Release with the generated notes.
-#
-# Authenticates as the tomborglum-workflows-bot GitHub App rather than with
-# GITHUB_TOKEN, because events created by GITHUB_TOKEN do not trigger further workflow
-# runs: the PR would never run the required SonarCloud gate, so main-protection could
-# never be satisfied and the release could never merge. App installation tokens have
-# no such restriction. The App needs Contents: read/write (branch, tag, release), Pull
-# requests: read/write (the release PR) and Issues: read/write (the autorelease:*
-# labels).
-#
-# One App per repository is the convention here (wsl-cloud-init-bot,
-# expense-tracker-bot, tomborglum-actions-bot, tomborglum-workflows-bot), so a leaked
-# private key reaches only the single repository it automates; this one is installed
-# on this repository only. The owner prefix is there because App names are globally
-# unique and "workflows" is not a distinctive repository name.
-#
-# Two repository secrets are required: AUTOMATION_APP_CLIENT_ID and
-# AUTOMATION_APP_PRIVATE_KEY. A missing or empty one fails the token step with
-# "The 'client-id' (or deprecated 'app-id') input must be set to a non-empty string".
-#
-# release-please-action's README asks for contents/issues/pull-requests write at the
-# workflow level. That applies when it falls back to GITHUB_TOKEN; here every API call
-# goes through the App token passed below, and actions/checkout is handed the same
-# token explicitly, so contents: read is sufficient.
+# The App is installed on this repository alone, so a leaked private key reaches nothing
+# else. It needs Contents: read/write (branch, tag, release), Pull requests: read/write
+# and Issues: read/write (the autorelease:* labels), and two repository secrets:
+# AUTOMATION_APP_CLIENT_ID and AUTOMATION_APP_PRIVATE_KEY. A missing or empty one fails
+# the token step with "The 'client-id' (or deprecated 'app-id') input must be set to a
+# non-empty string".
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+# Sufficient although release-please-action's README asks for more: every API call below
+# goes through the App token, and actions/checkout is handed it explicitly.
 permissions:
   contents: read
 
@@ -45,9 +29,8 @@ jobs:
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app-token
         with:
-          # client-id, not the deprecated app-id. These are different values:
-          # AUTOMATION_APP_CLIENT_ID holds the App's *Client ID* (App settings ->
-          # General -> Client ID), not the numeric App ID.
+          # The App's Client ID, which is neither the deprecated app-id input nor the
+          # numeric App ID. README.md says where to read it.
           client-id: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
 
@@ -58,27 +41,22 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Everything below maintains the moving major and minor tags, so a consumer can
-      # write `@v1` and get every 1.x release without editing their workflow. This is
-      # release-please's own documented recipe for repositories that publish actions,
-      # and it applies unchanged to one that publishes reusable workflows.
+      # Everything below maintains the moving major and minor tags. CONTRIBUTING.md
+      # states that contract.
       #
-      # `release_created` is only *set* when a release happened - the action hardcodes
-      # it to true and never writes false - so a bare truthiness check is correct here;
-      # `== 'true'` would also work but `!= 'true'` would not, and the asymmetry is
-      # easy to get wrong.
+      # `release_created` is set only when a release happened and is never written false,
+      # which is what makes the bare truthiness check below correct.
       #
-      # A manual run also moves them, against whatever the newest `vX.Y.Z` tag is. That
-      # is the recovery path when a release's tag push failed: the release and its exact
-      # tag already exist, so a re-run of the push event would report no release and skip
+      # A manual run moves them against the newest `vX.Y.Z` tag instead. That is the
+      # recovery path for a release whose tag push failed: the release and its exact tag
+      # already exist, so re-running the push event would report no release and skip
       # these steps.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         with:
           # Full history: the tags being moved may point anywhere in it.
           fetch-depth: 0
-          # Persist the App token so the `git push` below is authenticated as the App
-          # rather than as the restricted default GITHUB_TOKEN.
+          # Persist the App token, so the `git push` below is authenticated as the App.
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Resolve the bot's tagger identity
@@ -89,9 +67,8 @@ jobs:
           SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
-          # create-github-app-token exposes the slug but not the numeric user id,
-          # which the noreply address needs. Same pattern as expense-tracker's
-          # update-python.yml.
+          # The slug is an action output; the numeric user id the noreply address needs
+          # is not.
           id="$(gh api "/users/${SLUG}[bot]" --jq .id)"
           echo "name=${SLUG}[bot]" >> "$GITHUB_OUTPUT"
           echo "email=${id}+${SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
@@ -123,10 +100,9 @@ jobs:
             echo "Moving the tags for ${released} (${SHA})"
           fi
 
-          # Only vX and vX.Y move. The exact vX.Y.Z release-please just created is never
-          # touched again. The version-tags ruleset covers all of `v*` - creation,
-          # deletion and force pushes - so the force-push below works because this App is
-          # its only bypass actor, not because these tags fall outside it.
+          # Only vX and vX.Y move; the exact vX.Y.Z is never touched again. The
+          # version-tags ruleset covers all of `v*`, so the force-push below works
+          # because this App is its only bypass actor, not because these fall outside it.
           for tag in "v${MAJOR}" "v${MAJOR}.${MINOR}"; do
             # Present but pointing elsewhere is still moved: a patch release that failed
             # this step left vX.Y stale rather than missing.
