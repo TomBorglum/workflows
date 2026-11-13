@@ -1,0 +1,5 @@
+# A nested image directory. `upload-artifact` refuses a name containing a slash, so this fails
+# at the end of a build rather than before it.
+images:
+  directories:
+    services/fixture-image:

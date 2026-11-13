@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/TomBorglum/workflows/main/schema/docker-hub-publish.json",
+  "title": "docker-hub-publish config",
+  "description": "The file docker-hub-publish.yml reads through its `config` input. It declares what the calling repository publishes and the scan policy applied to it; the workflow's own inputs describe the caller's environment. README.md documents every key and the modeline that reaches this schema from an editor.\n\nThe workflow validates the caller's file against the copy of this schema belonging to the version the caller pinned. It checks the filesystem separately: that a declared directory exists, that it holds a Dockerfile and a docker-bake.hcl, and that a named suppression file is present.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "images"
+  ],
+  "properties": {
+    "images": {
+      "description": "Every image this repository publishes, and the gates applied to them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directories"
+      ],
+      "properties": {
+        "directories": {
+          "description": "One key per image, keyed by the directory holding it. Each publishes to <namespace>/<repository>-<directory>. The file's order is the build matrix's order.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/directoryName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/imageDirectory"
+          }
+        },
+        "gates": {
+          "description": "Gates applied to every image.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "vulnerability": {
+              "description": "`always` fails any event on a HIGH or CRITICAL finding. `release` fails a release and reports to the job summary on a pull_request. Neither value relaxes the separate wrong-image check.",
+              "enum": [
+                "always",
+                "release"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "compose-projects": {
+      "description": "One key per OCI compose artifact, keyed by the directory holding its compose.yaml. Each publishes to <namespace>/<repository>-<directory>. Omitted by a repository publishing images alone.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "propertyNames": {
+        "$ref": "#/$defs/directoryName"
+      },
+      "additionalProperties": {
+        "description": "A mapping is reserved so a per-project key can be added without a breaking change.",
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "properties": {}
+      }
+    }
+  },
+  "$defs": {
+    "directoryName": {
+      "description": "A single path component directly under the repository root. A nested compose project composes a three-component Docker Hub repository; a nested image directory produces an artifact name containing a slash, which upload-artifact refuses. The pattern excludes `.` and `..` with it.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*$"
+    },
+    "imageDirectory": {
+      "description": "One image. Empty when it declares no suppressions, which reaches here as null.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "trivyignores": {
+          "description": "Trivy ignore files applied to this image's scan alone, reaching it as --ignorefile. One file per element. At most one may be YAML-format: --ignorefile takes a single path and trivy-action concatenates plain-format files only, so a second YAML file would silently not apply.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/suppressionPath"
+          },
+          "contains": {
+            "$comment": "minContains 0, because `contains` alone would require a YAML-format file rather than permitting one.",
+            "pattern": "\\.ya?ml$"
+          },
+          "minContains": 0,
+          "maxContains": 1
+        },
+        "vex-documents": {
+          "description": "OpenVEX documents reaching Trivy as --vex for this image alone. A `not_affected` or `fixed` statement suppresses its finding; `affected` and `under_investigation` do not.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/suppressionPath"
+          }
+        }
+      }
+    },
+    "suppressionPath": {
+      "description": "One file, relative to the image's own directory. Reaching outside it is refused so two images cannot share one risk acceptance, which has to be able to diverge when one image is fixed and the other is not.",
+      "type": "string",
+      "minLength": 1,
+      "allOf": [
+        {
+          "$comment": "Not absolute.",
+          "pattern": "^[^/]"
+        },
+        {
+          "$comment": "Names a file, so no trailing slash.",
+          "pattern": "[^/]$"
+        },
+        {
+          "$comment": "The list is comma-joined for trivy, which splits on the comma.",
+          "not": {
+            "pattern": ","
+          }
+        },
+        {
+          "$comment": "A whole path component, so a file named `v1..2` is not refused.",
+          "not": {
+            "pattern": "(^|/)\\.\\.(/|$)"
+          }
+        }
+      ]
+    }
+  }
+}

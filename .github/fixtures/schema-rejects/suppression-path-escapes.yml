@@ -1,0 +1,7 @@
+# A `..` component would let two images share one risk acceptance, which then cannot diverge
+# when one of them is fixed and the other is not.
+images:
+  directories:
+    fixture-image:
+      vex-documents:
+        - ../fixture-image-plain/fixture.openvex.json

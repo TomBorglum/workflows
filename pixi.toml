@@ -1,0 +1,25 @@
+# This repository's own tooling. docker-hub-publish.yml provides it in `meta` with
+# TomBorglum/actions/direnv/setup; a maintainer gets the same binary from `pixi run`.
+#
+# pixi rather than a pip requirements file, because that is how every repository in this
+# ecosystem manages Python. update-pixi-dependencies.yml is the updater: Dependabot has no
+# pixi ecosystem, which is that workflow's reason for existing.
+#
+# Python is not declared. Nothing here is Python - the only thing used is the
+# check-jsonschema executable - so it is transitive and pinned by pixi.lock like every
+# other dependency of it.
+[workspace]
+name = "workflows"
+channels = ["conda-forge"]
+# CI runs ubuntu-latest. A maintainer on another platform adds it here and re-locks.
+platforms = ["linux-64"]
+
+[dependencies]
+# Exact, matching update-pixi-dependencies.yml's default `exact-version` strategy, so the
+# upgrade pull request states exactly what moved. This version runs in every consumer's
+# publish.
+#
+# check-jsonschema reads YAML natively, so a failure names the caller's own config file. A
+# validator reading the yq-converted JSON would report a position in a file the caller
+# never wrote.
+check-jsonschema = "==0.39.0"

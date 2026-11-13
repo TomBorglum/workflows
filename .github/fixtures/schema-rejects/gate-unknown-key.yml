@@ -1,0 +1,7 @@
+# `misconfiguration` is the name reserved for the gate that is out of scope, so declaring it
+# today must fail rather than do nothing.
+images:
+  gates:
+    misconfiguration: always
+  directories:
+    fixture-image:

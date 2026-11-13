@@ -1,0 +1,5 @@
+# A list cannot carry per-image keys, and a duplicate entry in one is not the YAML error a
+# duplicate mapping key is.
+images:
+  directories:
+    - fixture-image

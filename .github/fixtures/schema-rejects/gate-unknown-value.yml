@@ -1,0 +1,6 @@
+# An unrecognised value gates nothing: the comparison in `build` matches neither branch.
+images:
+  gates:
+    vulnerability: sometimes
+  directories:
+    fixture-image:

@@ -1,0 +1,6 @@
+# `vex-document` would apply no VEX document, and the release would read as scanned.
+images:
+  directories:
+    fixture-image:
+      vex-document:
+        - fixture.openvex.json

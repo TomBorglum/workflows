@@ -1,0 +1,7 @@
+# A misspelt section is otherwise a silent no-op.
+images:
+  directories:
+    fixture-image:
+imagez:
+  directories:
+    fixture-image:

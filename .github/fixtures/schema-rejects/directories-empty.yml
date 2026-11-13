@@ -1,0 +1,3 @@
+# An empty mapping parses, and a build matrix with no legs succeeds having published nothing.
+images:
+  directories: {}

@@ -1,0 +1,3 @@
+# A config declaring compose projects alone builds no image, and the matrix resolves empty.
+compose-projects:
+  fixture-compose:

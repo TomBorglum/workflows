@@ -1,0 +1,6 @@
+# Paths resolve against the image directory, so an absolute one is refused.
+images:
+  directories:
+    fixture-image:
+      trivyignores:
+        - /etc/.trivyignore
