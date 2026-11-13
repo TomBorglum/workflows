@@ -128,6 +128,14 @@ jobs:
           # deletion and force pushes - so the force-push below works because this App is
           # its only bypass actor, not because these tags fall outside it.
           for tag in "v${MAJOR}" "v${MAJOR}.${MINOR}"; do
+            # Present but pointing elsewhere is still moved: a patch release that failed
+            # this step left vX.Y stale rather than missing.
+            current="$(git rev-parse -q --verify "refs/tags/${tag}^{commit}" || true)"
+            if [[ "$current" == "$SHA" ]]; then
+              echo "${tag} already points at ${SHA}"
+              continue
+            fi
+
             git tag -f -a "$tag" -m "Release $tag" "$SHA"
 
             # GitHub has rejected one of these pushes with `[remote rejected] (failed)`,
