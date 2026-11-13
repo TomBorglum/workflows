@@ -36,6 +36,11 @@ name: docker-hub-publish test
 #
 # `images.gates` is left out of the config file, asserting the `always` default.
 #
+# The `schema` job tests schema/docker-hub-publish.json on its own, independently of a build.
+# It checks the schema against its metaschema, then validates every file in
+# .github/fixtures/schema-rejects/ and fails if any is accepted. A schema's whole job is
+# refusing things: a rule weakened by a later edit leaves every other test here green.
+#
 # The `release` branch of the vulnerability gate is not covered here and cannot be. It needs an
 # image carrying HIGH or CRITICAL findings, while fixture-image is FROM scratch precisely so
 # this repository's required check cannot fail on a CVE published against a base. A second call
@@ -55,6 +60,52 @@ permissions:
   contents: read
 
 jobs:
+  # The schema alone, so a broken schema or a weakened rule fails in seconds rather than
+  # after the image builds - and fails even when the valid config still happens to pass.
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same workspace and the same action docker-hub-publish.yml uses, so this job
+      # tests the validator consumers actually get. `working-directory` defaults to '.',
+      # which is where this repository's .envrc and pixi.toml live.
+      - name: Provide the config validator
+        uses: TomBorglum/actions/direnv/setup@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
+
+      # A schema that is itself invalid is accepted by nothing, so every consumer's run
+      # breaks at once. Checked before it is used to validate anything.
+      - name: Check the schema against its metaschema
+        run: check-jsonschema --check-metaschema schema/docker-hub-publish.json
+
+      # The same file `call` below passes, validated here too: this reports a schema fault
+      # as a schema fault rather than as a failed build.
+      - name: The schema accepts this repository's own config
+        run: |
+          check-jsonschema --schemafile schema/docker-hub-publish.json \
+            .github/fixtures/docker-hub-publish.yml
+
+      # Every fixture must fail. One that passes is a rule that stopped holding, which no
+      # other job here can see. .github/fixtures/schema-rejects/README.md records the rule
+      # each file covers.
+      - name: The schema refuses every rejection fixture
+        run: |
+          set -euo pipefail
+          accepted=0
+          for fixture in .github/fixtures/schema-rejects/*.yml; do
+            if check-jsonschema --schemafile schema/docker-hub-publish.json "$fixture" \
+              > /tmp/result 2>&1; then
+              echo "::error file=$fixture::accepted by the schema, which must refuse it."
+              accepted=1
+            else
+              printf 'refused %s\n' "$fixture"
+              sed -n '2p' /tmp/result
+            fi
+          done
+          [ "$accepted" -eq 0 ]
+
   call:
     uses: ./.github/workflows/docker-hub-publish.yml
     # A ceiling the called workflow can only lower, which `build` and `compose` both do.

@@ -29,7 +29,7 @@ policy below is unaffected by it.
 | --- | --- |
 | `id-token: write` on the calling job | The permissions ceiling is validated at run start, so a caller granting less fails with `startup_failure` and no job logs |
 | The triggers and the concurrency group | This workflow declares neither. See [Concurrency](#concurrency) |
-| A config file declaring what the repository publishes, `.github/docker-hub-publish.yml` by default | The one place image directories, compose projects, suppressions and the gate are declared. `README.md` documents every key |
+| A config file declaring what the repository publishes, `.github/docker-hub-publish.yml` by default | The one place image directories, compose projects, suppressions and the gate are declared. `README.md` documents every key, and `schema/docker-hub-publish.json` validates them before any image is built |
 | A `Dockerfile` and a `docker-bake.hcl` declaring `target "image"` per image directory | `bake-target: image` and `targets: image` are fixed in this workflow |
 | A `compose.yaml` declaring `name: <repository>-<directory>` per compose directory | Gated. See [What fails a release](#what-fails-a-release) |
 | Non-nested directories | `compose` refuses a nested directory, and the build artifact is named `image-<directory>`, which cannot contain a slash |
@@ -87,7 +87,9 @@ A **HIGH or CRITICAL** Trivy finding in any image.
 
 Suppressions go in a **`trivyignores`** list under that image's own directory in the config
 file: `.trivyignore` or `.trivyignore.yaml` files, one file per element, resolved against
-the image directory.
+the image directory. At most one element may be YAML-format. `--ignorefile` takes a single
+path, and `trivy-action` concatenates plain-format files only, so a second `.yaml` or `.yml`
+entry would be accepted and then silently suppress nothing.
 
 ```yaml
 images:

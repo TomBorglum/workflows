@@ -1,0 +1,7 @@
+# One file per element. The list is comma-joined for trivy, which splits on the comma, so an
+# element carrying one would silently become two paths.
+images:
+  directories:
+    fixture-image:
+      trivyignores:
+        - .trivyignore,.trivyignore.yaml

@@ -1,0 +1,24 @@
+# The workspace holding this repository's own tooling. One dependency today: the validator
+# docker-hub-publish.yml runs the config file through in its `meta` job, and the same binary
+# a maintainer runs locally with `pixi run check-jsonschema`.
+#
+# Declared here rather than as a pip requirements file so this repository manages Python the
+# way every repository in this ecosystem does: a pixi.toml, a pixi.lock, and the version
+# pinned in .envrc. update-pixi-dependencies.yml is the updater - Dependabot has no pixi
+# ecosystem, which is the workflow's whole reason for existing.
+[workspace]
+name = "workflows"
+channels = ["conda-forge"]
+# One platform. CI runs ubuntu-latest and this is the only platform the lock has to cover;
+# a maintainer on another one adds it here and re-locks.
+platforms = ["linux-64"]
+
+[dependencies]
+# Exact, matching update-pixi-dependencies.yml's default `exact-version` pinning strategy:
+# the upgrade pull request is then a statement of exactly what moved. This version runs in
+# every consumer's publish, so the version that is reviewed is the version that runs.
+#
+# check-jsonschema rather than another validator: it reads YAML natively, so a failure names
+# the caller's own config file. A validator reading the yq-converted JSON would report a
+# position in a file the caller never wrote.
+check-jsonschema = "==0.39.0"

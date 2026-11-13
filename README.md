@@ -227,8 +227,8 @@ compose-projects:
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `images.directories` | *(required)* | Mapping keyed by directory, one key per image. Each directory holds a `Dockerfile` and a `docker-bake.hcl`, and publishes to `<namespace>/<repository>-<directory>`. At least one key. |
-| `images.directories.<dir>.trivyignores` | *(none)* | List of `.trivyignore` or `.trivyignore.yaml` files, one file per element, applied to this image's scan alone. |
+| `images.directories` | *(required)* | Mapping keyed by directory, one key per image. Each directory holds a `Dockerfile` and a `docker-bake.hcl`, and publishes to `<namespace>/<repository>-<directory>`. At least one key. A key is one path component directly under the repository root, matching `[A-Za-z0-9_][A-Za-z0-9._-]*`. |
+| `images.directories.<dir>.trivyignores` | *(none)* | List of `.trivyignore` or `.trivyignore.yaml` files, one file per element, applied to this image's scan alone. At most one element may be YAML-format: `--ignorefile` takes a single path, and Trivy concatenates plain-format files only, so a second `.yaml` or `.yml` entry would silently not apply. |
 | `images.directories.<dir>.vex-documents` | *(none)* | List of OpenVEX documents, one file per element, reaching Trivy as `--vex` for this image alone. A `not_affected` or `fixed` statement suppresses its finding; `affected` and `under_investigation` do not. |
 | `images.gates.vulnerability` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and reports to the job summary on a `pull_request`. The separate wrong-image check is never relaxed. |
 | `compose-projects` | *(none)* | Mapping keyed by directory, one key per OCI compose artifact, publishing to `<namespace>/<repository>-<directory>`. Omitted by a repository publishing images alone. |
@@ -239,7 +239,44 @@ refused. `docs/docker-hub-publish.md` covers why a suppression belongs to one im
 
 A directory declared twice is a YAML duplicate-key error.
 
-Every key is validated before any image is built, and a failure names the key.
+#### Validating the config file
+
+[`schema/docker-hub-publish.json`](schema/docker-hub-publish.json) is a JSON Schema
+(draft 2020-12) describing every key above. The workflow validates the config file against
+it in `meta`, before any image is built, using the copy of the schema belonging to the
+version the caller pinned. A failure is reported as an annotation on the config file naming
+the key that failed.
+
+Reference the same schema from the config file to get those errors in an editor instead:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/TomBorglum/workflows/v2.0.0/schema/docker-hub-publish.json
+images:
+  directories:
+    backend:
+```
+
+Pin the tag the `uses:` line pins. The modeline is read by the YAML language server, which
+VS Code, Neovim and the JetBrains IDEs all use; it has no effect on the workflow itself.
+
+To run the same check locally, with the validator this repository pins:
+
+```bash
+pixi run check-jsonschema \
+  --schemafile https://raw.githubusercontent.com/TomBorglum/workflows/v2.0.0/schema/docker-hub-publish.json \
+  .github/docker-hub-publish.yml
+```
+
+The validator is declared in this repository's `pixi.toml` and pinned by `pixi.lock`, and
+`.envrc` pins the pixi that installs it. `meta` provides it with
+`TomBorglum/actions/direnv/setup`, so the binary the workflow runs is the binary a
+maintainer runs. `update-pixi-dependencies.yml` bumps it, because Dependabot has no pixi
+ecosystem.
+
+Unknown keys are refused, so a misspelt key fails the run rather than silently applying
+nothing. What the schema cannot check is the filesystem: that a declared directory exists,
+that it holds a `Dockerfile` and a `docker-bake.hcl`, and that a named suppression file is
+present. The workflow checks those separately, also before any image is built.
 
 #### Secrets
 

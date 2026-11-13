@@ -1,0 +1,7 @@
+# A nested compose project composes a three-component Docker Hub repository, and a project
+# name whose silently stripped slash collides with the flat spelling.
+images:
+  directories:
+    fixture-image:
+compose-projects:
+  stacks/fixture-compose:

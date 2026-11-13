@@ -1,0 +1,7 @@
+# The gate enum. An unrecognised value gates nothing: `meta` reads the key through and the
+# comparison in `build` matches neither branch.
+images:
+  gates:
+    vulnerability: sometimes
+  directories:
+    fixture-image:

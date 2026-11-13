@@ -21,6 +21,11 @@ name: Docker Hub publish
 # The runner fetches it into its own action cache, not into GITHUB_WORKSPACE: a checkout step
 # must never be added to make it resolve. A composite action appears in no OIDC claim, so the
 # role's trust policy pins this file's `job_workflow_ref` on a `v*.*.*` tag.
+#
+# `meta` uses a second action from the same repository and the same pin,
+# TomBorglum/actions/direnv/setup, to provide the config validator from this workflow's own
+# pixi workspace. The action-cache rule above holds for it too: `meta` does check the
+# repository out, but neither action resolves from that checkout.
 
 # Every `github.*` reference below resolves to the caller's event. The caller carries the
 # triggers and the concurrency group.
@@ -109,6 +114,80 @@ jobs:
         with:
           persist-credentials: false
 
+      # This workflow's own source, for the schema the config file is validated against.
+      # `actions/checkout` inside a called workflow checks out the caller, so the repository
+      # and ref are explicit. `job.workflow_sha` is the commit of the workflow running, so a
+      # caller pinned to @v2.0.0 validates against v2.0.0's schema and there is no version
+      # skew to manage. `job.workflow_*` is unavailable on GitHub Enterprise Server; this
+      # repository targets github.com.
+      #
+      # Nothing in this checkout is executed. The schema is data read by the validator, and
+      # the pixi workspace beside it declares that validator - neither is a script from this
+      # tree.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: workflow-source
+          persist-credentials: false
+
+      # The validator, out of this workflow's own pixi workspace in the checkout above.
+      # The .envrc there pins pixi, pixi.lock pins every package by version and sha256, and
+      # `use pixi` runs `pixi install --locked`, which aborts when the lock and the manifest
+      # disagree. Nothing is fetched at a floating version, and the action installs no
+      # toolchain of its own - it evaluates the .envrc and exports what that declares.
+      #
+      # pixi rather than pip: it is how every repository in this ecosystem provides Python,
+      # and update-pixi-dependencies.yml in this repository is what bumps it. Dependabot has
+      # no pixi ecosystem, which is that workflow's whole reason for existing.
+      - name: Provide the config validator
+        uses: TomBorglum/actions/direnv/setup@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
+        with:
+          working-directory: workflow-source
+
+      # Shape, before anything reads through it: required keys, unknown keys, enums, path
+      # patterns, and the rule that at most one trivyignores element may be YAML-format.
+      # The `images` step below keeps only the checks a schema cannot make, which are the
+      # ones about the filesystem.
+      #
+      # The schema comes from the checkout above rather than over the network: a caller
+      # pinned to a version must validate against that version's schema, and a fetch would
+      # let a schema change break a pinned caller.
+      - name: Validate the config against the schema
+        env:
+          CONFIG: ${{ inputs.config }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$CONFIG" ]; then
+            echo "::error::config file not found: $CONFIG"
+            exit 1
+          fi
+
+          # -o json, so each error becomes one annotation against the config file in the
+          # pull request's own diff rather than a line in a log nobody opens. The validator
+          # reports a JSON path and not a line number, so the path travels in the message
+          # and `line` keeps its default of 1.
+          if check-jsonschema -o json \
+            --schemafile workflow-source/schema/docker-hub-publish.json \
+            "$CONFIG" > /tmp/validation.json; then
+            echo "$CONFIG matches the schema"
+            exit 0
+          fi
+
+          # A crash rather than a validation failure writes nothing jq can read, and that
+          # must not surface as "no errors found".
+          if ! jq -e 'type == "object"' /tmp/validation.json > /dev/null 2>&1; then
+            echo "::error::check-jsonschema produced no readable result for $CONFIG"
+            cat /tmp/validation.json
+            exit 1
+          fi
+          jq -r --arg f "$CONFIG" '
+            (.parse_errors[]? | "::error file=\($f),title=Config parse error::\(.message)"),
+            (.errors[]? | "::error file=\($f),title=Config schema error::\(.path): \(.message)")
+          ' /tmp/validation.json
+          jq '.' /tmp/validation.json
+          exit 1
+
       # The image name is composed here and nowhere else: <namespace>/<repository>-<dir>, read
       # back from `image-list` and `image-map` so no consumer can spell one differently.
       # `image-list` is comma-joined because metadata-action splits `images` on newlines only,
@@ -126,32 +205,18 @@ jobs:
           fail() { echo "::error::$1"; exit 1; }
 
           # `required` is satisfied by a key being present, and an unset variable reaches
-          # a called workflow as an empty string.
+          # a called workflow as an empty string. Checked here rather than in the schema
+          # because it is an input: the schema governs the config file alone.
           if [[ ! "$DOCKERHUB_NAMESPACE" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
             fail "dockerhub-namespace must be lowercase letters, digits, - or _, got: '$DOCKERHUB_NAMESPACE'"
           fi
 
           # A missing binary would otherwise surface as a jq parse error on an empty file.
           command -v yq > /dev/null || fail "yq is not on PATH"
-          [ -f "$CONFIG" ] || fail "config file not found: $CONFIG"
-          # One conversion, so every check below is jq on JSON rather than two query languages.
+          # One conversion, so every read below is jq on JSON rather than two query
+          # languages. The file exists and its shape is already validated: the two steps
+          # above checked both, so nothing here re-checks a type or an enum.
           yq -o=json '.' "$CONFIG" > /tmp/config.json
-          jq -e 'type == "object"' /tmp/config.json > /dev/null \
-            || fail "$CONFIG must contain a YAML mapping"
-
-          # Structure, before anything reads through it. A directory declared with nothing to
-          # say is `backend:` with no value, which is null here, so null is legal wherever a
-          # mapping is and `// {}` stands in for it.
-          kind="$(jq -r '.images | type' /tmp/config.json)"
-          [ "$kind" = object ] || fail "images: must be a mapping, got $kind"
-          kind="$(jq -r '.images.directories | type' /tmp/config.json)"
-          [ "$kind" = object ] || fail "images.directories: must be a mapping, got $kind"
-          [ "$(jq -r '.images.directories | length' /tmp/config.json)" -gt 0 ] \
-            || fail "images.directories: must declare at least one directory"
-          kind="$(jq -r '.images.gates // {} | type' /tmp/config.json)"
-          [ "$kind" = object ] || fail "images.gates: must be a mapping, got $kind"
-          kind="$(jq -r '.["compose-projects"] // {} | type' /tmp/config.json)"
-          [ "$kind" = object ] || fail "compose-projects: must be a mapping, got $kind"
 
           # `keys_unsorted`, so the file's order is the matrix's order. A directory declared
           # twice never reaches here: duplicate keys are a YAML error, which is why both
@@ -160,76 +225,39 @@ jobs:
           jq -r '.["compose-projects"] // {} | keys_unsorted[]' /tmp/config.json \
             > /tmp/compose-directories
 
+          # What the schema cannot know: the filesystem. A declared directory may not exist,
+          # may hold no build files, and a named suppression file may be absent. Checked
+          # before any image is built, because a mistyped suppression path reaching the scan
+          # would be a suppression that silently does not load.
           while read -r directory; do
-            kind="$(jq -r --arg d "$directory" '.images.directories[$d] | type' /tmp/config.json)"
-            if [ "$kind" != object ] && [ "$kind" != null ]; then
-              fail "images.directories.$directory: must be a mapping or empty, got $kind"
-            fi
             [ -d "$directory" ] || fail "images.directories.$directory: no such directory"
             for required in Dockerfile docker-bake.hcl; do
               [ -f "$directory/$required" ] \
                 || fail "images.directories.$directory: $directory/$required not found"
             done
             for key in trivyignores vex-documents; do
-              kind="$(jq -r --arg d "$directory" --arg k "$key" \
-                '(.images.directories[$d] // {})[$k] | type' /tmp/config.json)"
-              if [ "$kind" = null ]; then
-                continue
-              fi
-              [ "$kind" = array ] \
-                || fail "images.directories.$directory.$key: must be a list, got $kind"
-              # `@json` rather than `tostring`: tostring renders the empty string as nothing at
-              # all, which is indistinguishable from "no bad elements" once the command
-              # substitution has stripped it.
-              bad="$(jq -r --arg d "$directory" --arg k "$key" \
-                '(.images.directories[$d] // {})[$k][]
-                 | select(type != "string" or . == "") | @json' /tmp/config.json)"
-              [ -z "$bad" ] \
-                || fail "images.directories.$directory.$key: every element must be a non-empty string, got: $bad"
+              # `// []` covers both a directory declaring nothing, which is null here, and
+              # a directory declaring the other key only.
               jq -r --arg d "$directory" --arg k "$key" \
-                '(.images.directories[$d] // {})[$k][]' /tmp/config.json > /tmp/suppression-paths
+                '((.images.directories[$d] // {})[$k] // [])[]' /tmp/config.json \
+                > /tmp/suppression-paths
               while read -r path; do
-                # One file per element. The list is comma-joined for trivy, which splits on the
-                # comma, so an element carrying one would silently become two paths.
-                case "$path" in
-                  *,*) fail "images.directories.$directory.$key: '$path' must name one file, and a comma separates two" ;;
-                  /*) fail "images.directories.$directory.$key: '$path' must be relative to the image directory" ;;
-                  # Required by SonarCloud's default-case rule; the `case` already fell through.
-                  *) ;;
-                esac
-                # Matched as a whole path component, so a file named `v1..2` is not refused.
-                # Reaching out of the directory would let two images share one acceptance,
-                # which then cannot diverge when one of them is fixed.
-                case "/$path/" in
-                  */../*) fail "images.directories.$directory.$key: '$path' must not leave the image directory" ;;
-                  *) ;;
-                esac
                 [ -f "$directory/$path" ] \
                   || fail "images.directories.$directory.$key: $directory/$path not found"
               done < /tmp/suppression-paths
             done
           done < /tmp/image-directories
 
-          # Nesting is refused here as well as in `compose`, so it fails before any image is
-          # built. Nesting composes a three-component Hub repository, and a project name whose
-          # silently stripped slash collides with the flat spelling.
           while read -r directory; do
             [ -n "$directory" ] || continue
-            case "$directory" in
-              */*) fail "compose-projects.$directory: must not be nested" ;;
-              # Required by SonarCloud's default-case rule; the `case` already fell through.
-              *) ;;
-            esac
             [ -d "$directory" ] || fail "compose-projects.$directory: no such directory"
             [ -f "$directory/compose.yaml" ] \
               || fail "compose-projects.$directory: $directory/compose.yaml not found"
           done < /tmp/compose-directories
 
-          # Checked here rather than where it is read, so a typo fails before any image is
-          # built: an unrecognised value would silently gate nothing.
+          # Read rather than checked: the schema has already refused every other value. The
+          # default lives here because an absent key has to resolve to something.
           gate="$(jq -r '.images.gates.vulnerability // "always"' /tmp/config.json)"
-          [ "$gate" = always ] || [ "$gate" = release ] \
-            || fail "images.gates.vulnerability must be 'always' or 'release', got: '$gate'"
           printf 'vulnerability-gate=%s\n' "$gate" >> "$GITHUB_OUTPUT"
 
           # The prefix every name below is built on, and what `push` exports to compose as
