@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.0.0](https://github.com/TomBorglum/workflows/compare/v1.2.0...v2.0.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **docker-hub-publish:** the `image-directories`, `compose-directories`, `trivyignores`, `vex-documents` and `vulnerability-gate` inputs are removed. Declare them in the config file instead: `images.directories` keyed by directory, `compose-projects` keyed by directory, per-image `trivyignores` and `vex-documents` lists resolved against the image directory, and `images.gates.vulnerability`. A caller still passing a removed input fails with `Invalid input`. README.md documents every key.
+
+### Features
+
+* **docker-hub-publish:** declare images in a config file ([#21](https://github.com/TomBorglum/workflows/issues/21)) ([8be4c58](https://github.com/TomBorglum/workflows/commit/8be4c58f5571af4b16bf0649f5fa86b7736c5ccf))
+* **docker-hub-publish:** report the suppressed findings on every run ([#25](https://github.com/TomBorglum/workflows/issues/25)) ([aa3e93c](https://github.com/TomBorglum/workflows/commit/aa3e93cf48bf718023f2306bedbba9165a07a9f0))
+* **docker-hub-publish:** validate the config file against a JSON Schema ([#23](https://github.com/TomBorglum/workflows/issues/23)) ([cfb744e](https://github.com/TomBorglum/workflows/commit/cfb744e4b0d51d04644417fbf6b02b3fce2ed287))
+
 ## [1.2.0](https://github.com/TomBorglum/workflows/compare/v1.1.1...v1.2.0) (2026-11-12)
 
 
