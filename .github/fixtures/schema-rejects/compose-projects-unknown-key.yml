@@ -1,0 +1,10 @@
+# `gates:` is the key copied across from `images:`. A compose artifact is never scanned, so
+# the gate it names would apply to nothing.
+images:
+  directories:
+    fixture-image:
+compose-projects:
+  directories:
+    fixture-compose:
+  gates:
+    vulnerability: always
