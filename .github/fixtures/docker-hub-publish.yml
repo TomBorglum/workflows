@@ -1,0 +1,23 @@
+# The config fixture _test-docker-hub-publish.yml runs docker-hub-publish.yml against. This
+# repository publishes nothing; every directory named here is a build fixture.
+#
+# Not at the default path, .github/docker-hub-publish.yml, so the test passes `config:`
+# explicitly. Nothing covers the default. README.md documents every key.
+#
+# `gates:` is absent, so the test covers the `always` default. The `release` branch cannot be
+# covered here - _test-docker-hub-publish.yml records why.
+images:
+  directories:
+    # Declares both suppression keys. Each path resolves against this directory:
+    # fixture-image/.trivyignore.yaml and fixture-image/fixture.openvex.json.
+    fixture-image:
+      trivyignores:
+        - .trivyignore.yaml
+      vex-documents:
+        - fixture.openvex.json
+    # Declares nothing, which is the assertion: this leg must receive no paths at all rather
+    # than the other image's.
+    fixture-image-plain:
+
+compose-projects:
+  fixture-compose:

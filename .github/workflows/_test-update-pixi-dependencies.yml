@@ -4,7 +4,7 @@ name: update-pixi-dependencies test
 #
 # Exercises update-pixi-dependencies.yml by calling it the way a consumer would, by local
 # path so the branch's version runs rather than a released tag. It upgrades
-# test/fixture-pixi-outdated - a workspace with an .envrc and a deliberately stale pin -
+# fixture-pixi-outdated - a workspace with an .envrc and a deliberately stale pin -
 # and then asserts what CONTRIBUTING says a caller test is for: that the declared outputs
 # really surface to the caller, and that an omitted optional input falls back to its
 # default.
@@ -46,7 +46,7 @@ jobs:
   call:
     uses: ./.github/workflows/update-pixi-dependencies.yml
     with:
-      working-directory: test/fixture-pixi-outdated
+      working-directory: fixture-pixi-outdated
       dry-run: true
       # pinning-strategy, branch, base and stub-directives are all omitted on purpose:
       # the assertions below are what proves their defaults applied.

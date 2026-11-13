@@ -6,22 +6,11 @@ Companion to [TomBorglum/actions](https://github.com/TomBorglum/actions), which
 publishes composite *actions* (steps you drop into a job). This repository publishes
 reusable *workflows* — whole jobs you call instead of writing.
 
-A reusable workflow is called at the **job** level, not as a step:
-
-```yaml
-jobs:
-  ci:
-    uses: TomBorglum/workflows/.github/workflows/node-ci.yml@v1
-    with:
-      node-version: "22"
-    secrets: inherit
-```
-
 ## Workflows
 
 | Workflow | Purpose |
 | --- | --- |
-| [`docker-hub-publish.yml`](#docker-hub-publish) | Build, scan, sign and publish one container image per directory to Docker Hub, plus an OCI compose artifact per compose directory, using GitHub OIDC and AWS to reach a Docker Hub credential. |
+| [`docker-hub-publish.yml`](#docker-hub-publish) | Build, scan, sign and publish one container image per directory declared in a config file to Docker Hub, plus an OCI compose artifact per compose project, using GitHub OIDC and AWS to reach a Docker Hub credential. |
 | [`update-pixi-dependencies.yml`](#update-pixi-dependencies) | Upgrade a [pixi](https://pixi.sh) workspace's dependencies and open a pull request with what moved — the updater Dependabot has no `pixi` ecosystem to provide. |
 
 Files prefixed with an underscore (`_release-please.yml`, `_sonarcloud.yml`) are this
@@ -130,9 +119,10 @@ that subject cuts a patch release.
 
 ### docker-hub-publish
 
-Builds one container image per directory you name, fails the release on a HIGH or CRITICAL
-Trivy finding, publishes each image to Docker Hub with `regctl`, signs every published
-digest with `cosign`, and publishes each compose directory as an OCI compose artifact.
+Builds one container image per directory a config file declares, fails the release on a HIGH
+or CRITICAL Trivy finding, publishes each image to Docker Hub with `regctl`, signs every
+published digest with `cosign`, and publishes each compose directory as an OCI compose
+artifact. Scan suppressions are declared per image, not per run.
 
 Docker Hub supports no OIDC for personal accounts, so the credential is reached through
 AWS: the publishing job mints a GitHub OIDC token, assumes an IAM role with it, and reads
@@ -167,13 +157,13 @@ concurrency:
 
 jobs:
   images:
-    uses: TomBorglum/workflows/.github/workflows/docker-hub-publish.yml@v1.1.0
+    uses: TomBorglum/workflows/.github/workflows/docker-hub-publish.yml@v2.0.0
     permissions:
       contents: read
       id-token: write
     with:
-      image-directories: '["backend", "frontend"]'
-      compose-directories: '["stack"]'
+      # Optional. Defaults to .github/docker-hub-publish.yml.
+      # config: .github/docker-hub-publish.yml
       aws-region: ${{ vars.AWS_REGION }}
       aws-ssm-parameter: /my-project/release/dockerhub-pat
       dockerhub-namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
@@ -183,40 +173,73 @@ jobs:
 
 **Pin an exact `@v1.2.3`, not `@v1`.** The IAM trust policy matches the called workflow's
 `job_workflow_ref`, and the recommended pattern admits only immutable exact versions, so a
-`@v1` pin cannot assume the role. This is the one workflow here where the moving tag is
-the wrong choice.
+`@v1` pin cannot assume the role.
 
 #### Requirements
 
-Everything the publishing job touches in AWS has to exist first, and the role's trust
-policy is what denies every other repository. `docs/docker-hub-publish.md` walks it;
-in outline:
+Everything the publishing job touches in AWS must exist first.
+[`docs/docker-hub-publish.md`](docs/docker-hub-publish.md) gives each object in full.
 
 - An **IAM role** whose trust policy matches *both* the calling repository's `sub` claim
-  and this workflow's `job_workflow_ref` claim. Either alone is insufficient — this
-  repository is public, so `job_workflow_ref` on its own would let anyone reach your role.
+  and this workflow's `job_workflow_ref` claim. Either alone is insufficient: this
+  repository is public, so `job_workflow_ref` alone would let any repository reach the role.
 - An **SSM SecureString** holding a Docker Hub PAT with Read & Write, and an inline policy
   granting `ssm:GetParameter` on that one parameter ARN as a literal.
 - **`id-token: write`** on the calling job, as above.
+- A **config file** declaring what the repository publishes, `.github/docker-hub-publish.yml`
+  by default.
 - Per image directory, a **`Dockerfile`** and a **`docker-bake.hcl` declaring
   `target "image"`**.
 - Per compose directory, a **`compose.yaml` declaring `name: <repository>-<directory>`**,
   with every variable it interpolates carrying a `:?` guard or a `:-` default. No `.env`
   is required.
-- **No nested directories** in either list.
+- **No nested directories** in either collection.
 
 #### Inputs
 
+The inputs describe the **caller's environment**. What the repository contains, and the scan
+policy applied to it, live in the config file.
+
 | Input | Default | Description |
 | --- | --- | --- |
-| `image-directories` | *(required)* | JSON array of directories built into images, one image each. Each holds a `Dockerfile` and a `docker-bake.hcl`. Publishes to `<namespace>/<repository>-<directory>`. |
-| `compose-directories` | `"[]"` | JSON array of directories published as OCI compose artifacts, one each, following the same name formula. Empty for a repository publishing images alone. |
+| `config` | `.github/docker-hub-publish.yml` | Path to the config file, relative to the repository root. |
 | `aws-region` | *(required)* | Region the role is assumed in and the PAT parameter is read from. |
 | `aws-ssm-parameter` | *(required)* | Absolute SSM path holding the Docker Hub PAT. Not a secret: a path is an address. |
 | `dockerhub-namespace` | *(required)* | Docker Hub namespace every image publishes under. Must be the account the PAT belongs to, which nothing checks. |
-| `trivyignores` | *(none)* | Comma-separated list of relative paths within the repository to one or more `.trivyignore` files, or a single `.trivyignore.yaml` file. |
-| `vex-documents` | *(none)* | Comma-separated list of relative paths to OpenVEX documents, reaching Trivy as `--vex`. A `not_affected` or `fixed` statement suppresses its finding; `affected` does not. |
-| `vulnerability-gate` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and reports to the job summary on a `pull_request`. The separate wrong-image check is never relaxed. |
+
+#### The config file
+
+```yaml
+# .github/docker-hub-publish.yml
+images:
+  gates:
+    vulnerability: release
+  directories:
+    backend:
+    frontend:
+      trivyignores:
+        - .trivyignore.yaml
+      vex-documents:
+        - frontend.openvex.json
+compose-projects:
+  stack:
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `images.directories` | *(required)* | Mapping keyed by directory, one key per image. Each directory holds a `Dockerfile` and a `docker-bake.hcl`, and publishes to `<namespace>/<repository>-<directory>`. At least one key. |
+| `images.directories.<dir>.trivyignores` | *(none)* | List of `.trivyignore` or `.trivyignore.yaml` files, one file per element, applied to this image's scan alone. |
+| `images.directories.<dir>.vex-documents` | *(none)* | List of OpenVEX documents, one file per element, reaching Trivy as `--vex` for this image alone. A `not_affected` or `fixed` statement suppresses its finding; `affected` and `under_investigation` do not. |
+| `images.gates.vulnerability` | `always` | Which caller events a HIGH or CRITICAL finding fails. `always` fails every event; `release` fails a release and reports to the job summary on a `pull_request`. The separate wrong-image check is never relaxed. |
+| `compose-projects` | *(none)* | Mapping keyed by directory, one key per OCI compose artifact, publishing to `<namespace>/<repository>-<directory>`. Omitted by a repository publishing images alone. |
+
+Paths in `trivyignores` and `vex-documents` resolve against the image's own directory. An
+absolute path, a path containing a `..` component and a path containing a comma are each
+refused. `docs/docker-hub-publish.md` covers why a suppression belongs to one image.
+
+A directory declared twice is a YAML duplicate-key error.
+
+Every key is validated before any image is built, and a failure names the key.
 
 #### Secrets
 
@@ -228,10 +251,9 @@ The workflow declares **no outputs**. What crosses the boundary is what it publi
 
 #### What it does not do
 
-Publishing happens only on a `release` event — the job holding the credential carries
-`if: github.event_name == 'release'`. On a pull request the images are still built,
-scanned and gated and the compose files still validated, so a change that breaks the
-release is caught before the tag exists.
+Publishing happens only on a `release` event: the job holding the credential carries
+`if: github.event_name == 'release'`. On a pull request the images are built, scanned and
+gated and the compose files validated, and nothing is published.
 
 ## Versioning and pinning
 
@@ -261,24 +283,6 @@ A major bump means `v1` stops moving. You stay on 1.x until you change the pin t
 
 See the [changelog](CHANGELOG.md) for what each release contained, and
 [releases](https://github.com/TomBorglum/workflows/releases) for the generated notes.
-
-## Constraints worth knowing before you call one
-
-These are GitHub's, not this repository's, and they shape how it is laid out:
-
-- **The path is fixed.** A reusable workflow is addressed as
-  `OWNER/REPO/.github/workflows/FILE@REF`. Subdirectories are not addressable, so
-  every workflow here is a flat file in `.github/workflows/` and all of the structure
-  lives in the filenames.
-- **This repository is public on purpose.** A *public* caller can only call reusable
-  workflows in *public* repositories. A private caller can call either.
-- **There are no redirects.** GitHub deliberately does not redirect renamed actions
-  or reusable workflows — if this repository were renamed, every `uses:` referencing
-  it would start failing. The name is permanent.
-- **`env` does not cross the boundary**, in either direction. Values go in as
-  `inputs` and come back as `outputs`.
-- **Nesting is capped** at 10 levels deep, and 50 unique reusable workflows per
-  caller file (counting nested trees).
 
 ## Guardrails
 

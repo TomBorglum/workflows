@@ -1,0 +1,15 @@
+# Suppressions for this image and no other.
+#
+# docker-hub-publish.yml resolves every element of `trivyignores` against the image's own
+# directory, so this file is reachable only from the `fixture-image` entry in
+# .github/fixtures/docker-hub-publish.yml. fixture-image-plain declares no suppressions, and
+# the test asserts that it receives none.
+#
+# The id below matches nothing. fixture-image is FROM scratch, so it carries no packages and
+# the scan reports no findings; this file proves that a declared suppression file is validated,
+# resolved and handed to trivy. A real id would make the fixture depend on a CVE staying
+# published.
+vulnerabilities:
+  - id: CVE-0000-00000
+    statement: >-
+      Fixture entry. Matches no finding: fixture-image is FROM scratch and has no packages.

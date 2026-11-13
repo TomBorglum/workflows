@@ -1,0 +1,22 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/workflows-fixture-image",
+  "author": "TomBorglum/workflows test fixture",
+  "timestamp": "2026-11-12T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-0000-00000"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/workflows-fixture-image?repository_url=docker.io%2Ffixture-namespace%2Fworkflows-fixture-image"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Fixture document. fixture-image is FROM scratch and carries no packages, so this statement matches no finding. It exists to prove that a declared vex-documents path is validated, resolved against the image directory and handed to trivy as TRIVY_VEX."
+    }
+  ]
+}
