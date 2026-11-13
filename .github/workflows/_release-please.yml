@@ -67,8 +67,13 @@ jobs:
       # it to true and never writes false - so a bare truthiness check is correct here;
       # `== 'true'` would also work but `!= 'true'` would not, and the asymmetry is
       # easy to get wrong.
+      #
+      # A manual run also moves them, against whatever the newest `vX.Y.Z` tag is. That
+      # is the recovery path when a release's tag push failed: the release and its exact
+      # tag already exist, so a re-run of the push event would report no release and skip
+      # these steps.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         with:
           # Full history: the tags being moved may point anywhere in it.
           fetch-depth: 0
@@ -78,7 +83,7 @@ jobs:
 
       - name: Resolve the bot's tagger identity
         id: bot
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SLUG: ${{ steps.app-token.outputs.app-slug }}
@@ -92,7 +97,7 @@ jobs:
           echo "email=${id}+${SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
 
       - name: Move the major and minor tags
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         env:
           NAME: ${{ steps.bot.outputs.name }}
           EMAIL: ${{ steps.bot.outputs.email }}
@@ -105,11 +110,37 @@ jobs:
           git config user.name  "$NAME"
           git config user.email "$EMAIL"
 
+          # Empty on a manual run, where release-please reports no release.
+          if [[ -z "$SHA" ]]; then
+            released="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
+            if [[ ! "$released" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+              echo "::error::No vX.Y.Z tag to move the major and minor tags to (found '${released}')"
+              exit 1
+            fi
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            SHA="$(git rev-list -n 1 "$released")"
+            echo "Moving the tags for ${released} (${SHA})"
+          fi
+
           # Only vX and vX.Y move. The exact vX.Y.Z release-please just created is never
           # touched again. The version-tags ruleset covers all of `v*` - creation,
           # deletion and force pushes - so the force-push below works because this App is
           # its only bypass actor, not because these tags fall outside it.
           for tag in "v${MAJOR}" "v${MAJOR}.${MINOR}"; do
             git tag -f -a "$tag" -m "Release $tag" "$SHA"
-            git push --force origin "refs/tags/$tag"
+
+            # GitHub has rejected one of these pushes with `[remote rejected] (failed)`,
+            # no reason and a rule suite that recorded the bypass as allowed:
+            # https://github.com/TomBorglum/workflows/actions/runs/43434401312
+            for attempt in 1 2 3; do
+              if git push --force origin "refs/tags/$tag"; then
+                break
+              fi
+              if (( attempt == 3 )); then
+                echo "::error::Pushing ${tag} failed three times"
+                exit 1
+              fi
+              sleep $(( attempt * 5 ))
+            done
           done
