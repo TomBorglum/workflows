@@ -1,8 +1,8 @@
-# What this repository publishes, read by .github/workflows/docker-hub-publish.yml.
+# The config fixture _test-docker-hub-publish.yml runs docker-hub-publish.yml against. This
+# repository publishes nothing; every directory named here is a build fixture.
 #
-# This repository is its own caller: _test-docker-hub-publish.yml calls the workflow by local
-# path, so this file is both the fixture the test runs against and the worked example a consumer
-# copies. README.md documents every key.
+# Not at the default path, .github/docker-hub-publish.yml, so the test passes `config:`
+# explicitly. Nothing covers the default. README.md documents every key.
 #
 # `gates:` is absent, so the test covers the `always` default. The `release` branch cannot be
 # covered here - _test-docker-hub-publish.yml records why.

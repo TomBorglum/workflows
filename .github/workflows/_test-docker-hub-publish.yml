@@ -28,11 +28,12 @@ name: docker-hub-publish test
 # a fork pull request, where secrets are never available. Nothing ever assumes it: the only step
 # that reads it is in `push`.
 #
-# The config file is .github/docker-hub-publish.yml, and the `config` input is left unset so the
-# run also asserts that its default finds it. The file declares two images: fixture-image with
-# both suppression keys, and fixture-image-plain with none. That pairing proves each matrix leg
-# receives its own paths rather than the union of every image's, which is the defect the config
-# file replaced. `assert` reads both legs' staged paths back to check it.
+# The config file is .github/fixtures/docker-hub-publish.yml, passed as `config` because it is
+# not at the input's default path. Nothing here covers that default. The file declares two
+# images: fixture-image with both suppression keys, and fixture-image-plain with none. That
+# pairing proves each matrix leg receives its own paths rather than the union of every image's,
+# which is the defect the config file replaced. `assert` reads both legs' staged paths back to
+# check it.
 #
 # `images.gates` is left out of the config file, asserting the `always` default.
 #
@@ -62,9 +63,8 @@ jobs:
       contents: read
       id-token: write
     with:
-      # No `config`: the default, .github/docker-hub-publish.yml, declares both image
-      # directories and the compose project, and the default is part of what this asserts.
-      #
+      # Declares both image directories and the compose project.
+      config: .github/fixtures/docker-hub-publish.yml
       # Well-formed but inert. Everything that validates them runs in `push`, which skips
       # here, so these only have to satisfy the declarations.
       aws-region: eu-north-1
