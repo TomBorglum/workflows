@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/TomBorglum/workflows/compare/v2.0.0...v2.0.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **docker-hub-publish:** require directories under compose-projects ([#30](https://github.com/TomBorglum/workflows/issues/30)) ([56d2491](https://github.com/TomBorglum/workflows/commit/56d24910fb829e1424cc31a6681d32b2b339c306))
+
 ## [2.0.0](https://github.com/TomBorglum/workflows/compare/v1.2.0...v2.0.0) (2026-11-13)
 
 
