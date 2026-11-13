@@ -1,36 +1,11 @@
 name: Update pixi dependencies
 
 # Upgrades a pixi workspace's dependencies and opens a pull request with the result.
+# README.md documents the caller contract.
 #
-# This is the other half of TomBorglum/actions/pixi/upgrade-dependencies, which performs
-# the upgrade and reports what moved but deliberately opens no pull request. Dependabot
-# has no pixi ecosystem, so a version declared in a pixi.toml is never bumped for you,
-# however many other ecosystems a repository has covered. Call this on a schedule and it
-# becomes the pixi updater Dependabot does not provide.
-#
-# The job is three things: provide pixi, upgrade, open a pull request.
-#
-# pixi comes from the CALLER'S OWN .envrc. direnv/setup evaluates it, and its `use pixi
-# <version>` directive installs that exact pixi and puts it on PATH; the action installs
-# none itself. So the resolver that judges an upgrade is the one the consuming repository
-# already pins for its workstations and its CI, and there is no pixi version to configure
-# here - or to keep in step with theirs.
-#
-# Every way a caller can get the setup wrong fails the job rather than passing green:
-# a missing .envrc fails in direnv/setup, an .envrc with no `use pixi` line fails in the
-# action with a message naming both supported providers, and `use pixi` without a version
-# fails in the directive. A green run that silently upgraded nothing is the one outcome
-# worse than a red one.
-#
-# NOTE for consumers with a committed pixi.lock: use_pixi runs `pixi install --locked`,
-# which aborts if the lockfile does not match the manifest. A workspace whose lockfile has
-# already drifted must commit a consistent one before this workflow can run.
-#
-# Authenticates as a GitHub App rather than with GITHUB_TOKEN, because events created with
-# GITHUB_TOKEN do not trigger further workflow runs: the pull request would never run the
-# caller's own required checks, and a dependency bump that cannot be checked is worse than
-# no bump. App installation tokens have no such restriction - it is the only method
-# create-pull-request documents as triggering both `on: push` and `on: pull_request`.
+# The pull request is opened as a GitHub App, never with GITHUB_TOKEN: an event created
+# with GITHUB_TOKEN triggers no further workflow run, so the caller's own required checks
+# would never run on the pull request this opens.
 
 on:
   workflow_call:
@@ -114,10 +89,8 @@ on:
           URL of that pull request. Empty under the same conditions as the number.
         value: ${{ jobs.update.outputs.pull-request-url }}
 
-# Minimal, and sufficient: every write below goes through the App token, which is not
-# GITHUB_TOKEN and is unaffected by this block. A reusable workflow cannot grant itself
-# more than the caller already has, so declaring it narrowly documents the contract and
-# fails loudly when a caller has granted less.
+# Every write below goes through the App token, which this block does not govern.
+# Declared narrowly so a caller that granted less fails loudly.
 permissions:
   contents: read
 
@@ -130,13 +103,9 @@ jobs:
       pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
       pull-request-url: ${{ steps.cpr.outputs.pull-request-url }}
     steps:
-      # Fail here rather than four steps later. Without this, a caller that forgot the
-      # secrets gets create-github-app-token's generic "must be set to a non-empty
-      # string", which names neither this workflow nor which of the two is missing.
-      #
-      # A `run:` test rather than an `if:` because secrets cannot be referenced in an
-      # `if:` conditional at all - GitHub's own guidance is this env-variable
-      # indirection. An unset secret evaluates to the empty string, which is the signal.
+      # Fail here rather than four steps later, naming this workflow and the missing
+      # secret. A `run:` test rather than an `if:` because a secret cannot be referenced
+      # in an `if:` at all, hence the env indirection; unset arrives as the empty string.
       - name: Require the App credentials unless this is a dry run
         if: ${{ !inputs.dry-run }}
         env:
@@ -164,16 +133,12 @@ jobs:
           client-id: ${{ secrets.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
 
-      # The App token when there is one, the built-in token otherwise: a skipped step's
-      # output is the empty string, so a dry run falls through to github.token and still
-      # checks out. The App token is what the push and the pull request below are made
-      # with, which is the whole reason it is here rather than GITHUB_TOKEN.
+      # A skipped step's output is the empty string, so a dry run falls through to
+      # github.token and still checks out.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
-      # Provides pixi. The version is the caller's, declared in their .envrc as
-      # `use pixi <version>`; this workflow neither pins one nor accepts one.
       - name: Install pixi from the workspace's .envrc
         uses: TomBorglum/actions/direnv/setup@f3028cddd68f2efc77b63a3f4fd749e541c8701c # v3.1.0
         with:
@@ -187,16 +152,9 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
           pinning-strategy: ${{ inputs.pinning-strategy }}
 
-      # Name the two files the upgrade is allowed to have touched, so the pull request
-      # cannot carry anything else. This matters more than it looks: direnv/setup's
-      # use_pixi runs `pixi install`, so .pixi/envs/ is sitting in the checkout by now -
-      # a whole materialised environment, which create-pull-request would commit along
-      # with everything else if add-paths were left unset. With it set, non-matching
-      # changes are stashed and restored instead, so the diff is these two files whatever
-      # else a directive left behind, and whatever the consumer's .gitignore does or does
-      # not cover.
-      #
-      # The prefix is collapsed for a '.' working directory so the pathspec reads
+      # The two files the upgrade is allowed to have touched, so nothing else in the
+      # checkout can reach the pull request. README.md states what that excludes.
+      # The prefix collapses for a '.' working directory, so the pathspec reads
       # `pixi.toml` rather than `./pixi.toml`.
       - name: Resolve the paths to commit
         id: paths
@@ -219,8 +177,7 @@ jobs:
             printf '%s\n' "$delimiter"
           } >> "$GITHUB_OUTPUT"
 
-      # The job summary is the entire payload of a dry run, and a useful record of a real
-      # one even once the pull request exists.
+      # The job summary is the entire payload of a dry run.
       - name: Report what moved
         env:
           CHANGED: ${{ steps.upgrade.outputs.changed }}
@@ -242,10 +199,8 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # sign-commits: true is why no bot identity is resolved here. With an App token the
-      # action signs the commit as <app>[bot] and documents that it then IGNORES the
-      # committer and author inputs, which retires the `gh api /users/<slug>[bot]` lookup
-      # the sibling repo's update-direnv.yml needs for the same job.
+      # No bot identity is resolved here because `sign-commits` below makes the action
+      # ignore the committer and author inputs.
       - name: Create pull request
         id: cpr
         if: ${{ !inputs.dry-run && steps.upgrade.outputs.changed == 'true' }}

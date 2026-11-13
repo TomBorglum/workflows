@@ -1,35 +1,17 @@
 name: Update pixi dependencies
 
-# This repository's own CI, not a reusable workflow - hence the leading underscore.
-#
 # Calls update-pixi-dependencies.yml by local path, so main's version runs rather than a
-# released tag. Without this nothing bumps the check-jsonschema pin in pixi.toml, which
-# docker-hub-publish.yml provides to every consumer's `meta` job: Dependabot has no pixi
-# ecosystem, which is that workflow's reason for existing.
+# released tag. What it bumps is the check-jsonschema pin that docker-hub-publish.yml
+# provides to every consumer's `meta` job.
 #
-# A schedule only fires from the default branch, so this workflow does nothing until it is
-# merged to main.
-#
-# The secrets are the tomborglum-workflows-bot App already used by _release-please.yml,
-# which needs Contents: read/write and Pull requests: read/write - the same two
-# permissions update-pixi-dependencies.yml documents. Nothing further is provisioned.
-#
-# Four inputs are omitted:
-#
-#   - working-directory, because the workspace is at the repository root.
-#     fixture-pixi-outdated is a separate workspace and is deliberately left stale; it is
-#     the fixture _test-update-pixi-dependencies.yml upgrades.
-#   - base, because a scheduled run has main checked out rather than a detached HEAD.
-#   - pinning-strategy, keeping exact-version, matching the `==` constraint in pixi.toml.
-#   - branch, keeping deps/pixi.
-#
-# The pull request title is `deps: update pixi dependencies`, which CONTRIBUTING classes
-# as a patch bump.
+# A schedule fires from the default branch alone, so this does nothing until it is merged.
+# The secrets are the tomborglum-workflows-bot App _release-please.yml already uses;
+# nothing further is provisioned. Every input is left at its default.
 
 on:
   schedule:
-    # Monday 06:00 UTC. A missed run is a week's delay, not a lost upgrade: the next run
-    # upgrades to whatever is current and updates the same branch.
+    # A missed run is a week's delay, not a lost upgrade: the next run upgrades to
+    # whatever is current and updates the same branch.
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
