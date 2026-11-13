@@ -1,7 +1,5 @@
 name: SonarCloud
 
-# This repository's own CI, not a reusable workflow - hence the leading underscore.
-
 on:
   push:
     branches: [main]
