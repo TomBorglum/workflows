@@ -420,6 +420,7 @@ jobs:
         env:
           # `--skip-version-check`, which the action exposes no input for.
           TRIVY_SKIP_VERSION_CHECK: "true"
+          TRIVY_SHOW_SUPPRESSED: "true"
         with:
           scan-type: image
           input: /tmp/oci
@@ -432,10 +433,14 @@ jobs:
           output: /tmp/trivy.json
           exit-code: 0
 
-      # Two checks, because a passing trivy run does not mean this image was scanned. The
-      # wrong-image check runs first, then the vulnerability check. Pointed at a layout it
-      # cannot walk, trivy resolves the empty config `{}`, reports nothing and exits 0 -
-      # and `{}` declares no platform, which is what the wrong-image check catches.
+      # Two checks and a report, because a passing trivy run does not mean this image was
+      # scanned. The wrong-image check runs first, then the report, then the vulnerability
+      # check. Pointed at a layout it cannot walk, trivy resolves the empty config `{}`,
+      # reports nothing and exits 0 - and `{}` declares no platform, which is what the
+      # wrong-image check catches.
+      #
+      # The report is unconditional: a suppressed finding is absent from .Vulnerabilities, so
+      # an image holding ten accepted CVEs otherwise reads exactly like one holding none.
       #
       # `images.gates.vulnerability` relaxes the vulnerability check only. Relaxing the
       # wrong-image check would let a scan of the wrong thing read as a clean image.
@@ -462,18 +467,56 @@ jobs:
           fi
           echo "scanned $DIRECTORY: $config ($platform)"
 
+          printf '### %s image\n\n' "$DIRECTORY" >> "$GITHUB_STEP_SUMMARY"
+
+          # `.Type` is filtered because the field carries every class of modified finding, so a
+          # scanner added here later would otherwise land in this table. `@tsv` so a missing
+          # statement leaves an empty column rather than shifting the ones after it, and `[]?`
+          # throughout because trivy omits the key entirely when nothing was suppressed.
+          suppressed="$(jq -r '.Results[]?.ExperimentalModifiedFindings[]?
+                               | select(.Type == "vulnerability")
+                               | [.Finding.Severity, .Finding.VulnerabilityID,
+                                  "\(.Finding.PkgName) \(.Finding.InstalledVersion)",
+                                  .Status, .Source, (.Statement // "")]
+                               | @tsv' /tmp/trivy.json)"
+          if [ -n "$suppressed" ]; then
+            suppressed_count="$(printf '%s\n' "$suppressed" | wc -l)"
+            printf '%s suppressed HIGH or CRITICAL finding(s):\n' "$suppressed_count"
+            printf '%s\n' "$suppressed"
+            {
+              printf '%s suppressed HIGH or CRITICAL finding(s), accepted by this image via its `trivyignores` or `vex-documents`.\n\n' "$suppressed_count"
+              printf '| Severity | ID | Package | Status | Source | Statement |\n'
+              printf '| --- | --- | --- | --- | --- | --- |\n'
+              # A `|` in a statement would end its cell. Escaped here rather than in jq,
+              # where it would reach the step log above too.
+              printf '%s\n' "$suppressed" | sed 's/|/\\|/g' \
+                | awk -F'\t' '{printf "| %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6}'
+              printf '\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+            # A notice, not a warning: a repository holding one standing acceptance would
+            # otherwise warn on every build.
+            echo "::notice::$suppressed_count suppressed HIGH or CRITICAL finding(s) in the $DIRECTORY image, accepted by its trivyignores or vex-documents."
+          else
+            echo "nothing suppressed"
+            printf 'Nothing suppressed.\n\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           findings="$(jq -r '.Results[]?.Vulnerabilities[]?
-                             | "\(.Severity)\t\(.VulnerabilityID)\t\(.PkgName) \(.InstalledVersion) -> \(.FixedVersion // "no fix")"' /tmp/trivy.json)"
+                             | [.Severity, .VulnerabilityID,
+                                "\(.PkgName) \(.InstalledVersion) -> \(.FixedVersion // "no fix")"]
+                             | @tsv' /tmp/trivy.json)"
           if [ -n "$findings" ]; then
             printf '%s\n' "$findings"
             count="$(printf '%s\n' "$findings" | wc -l)"
+            {
+              printf '%s HIGH or CRITICAL finding(s).\n\n' "$count"
+              printf '| Severity | ID | Package |\n| --- | --- | --- |\n'
+              printf '%s\n' "$findings" | awk -F'\t' '{printf "| %s | %s | %s |\n", $1, $2, $3}'
+              printf '\n'
+            } >> "$GITHUB_STEP_SUMMARY"
             if [ "$VULNERABILITY_GATE" = 'release' ] && [ "$EVENT" = 'pull_request' ]; then
-              {
-                printf '### %s image: %s HIGH or CRITICAL finding(s)\n\n' "$DIRECTORY" "$count"
-                printf 'Advisory on a pull request. The release gate blocks on these.\n\n'
-                printf '| Severity | ID | Package |\n| --- | --- | --- |\n'
-                printf '%s\n' "$findings" | awk -F'\t' '{printf "| %s | %s | %s |\n", $1, $2, $3}'
-              } >> "$GITHUB_STEP_SUMMARY"
+              printf 'Advisory on a pull request. The release gate blocks on these.\n\n' \
+                >> "$GITHUB_STEP_SUMMARY"
               echo "::warning::$count HIGH or CRITICAL finding(s) in the $DIRECTORY image, advisory on a pull request."
               exit 0
             fi
@@ -481,6 +524,7 @@ jobs:
             exit 1
           fi
           echo "no HIGH or CRITICAL findings"
+          printf 'No HIGH or CRITICAL findings.\n\n' >> "$GITHUB_STEP_SUMMARY"
 
       # Both travel with the archive, so `push` needs no list of its own and can prove
       # nothing changed in transit.

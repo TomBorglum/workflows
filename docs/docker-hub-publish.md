@@ -119,6 +119,11 @@ what expires. Unreachability is a property of the image and does not rot, so a V
 statement carries a justification and no date; a finding merely waiting for a fix keeps
 a dated `.trivyignore` entry.
 
+Every run reports what it suppressed, in the step log and the job summary: each suppressed
+HIGH or CRITICAL finding, its status, the file that suppressed it and its statement. An image
+that suppressed nothing reports `Nothing suppressed.`. A suppressed MEDIUM or lower finding is
+never listed, because the scan asks for `HIGH,CRITICAL` alone.
+
 ## Which events a HIGH or CRITICAL finding fails
 
 The scan produces two independent checks. The **wrong-image check** proves trivy scanned
@@ -128,7 +133,7 @@ reports nothing and exits 0, so a broken scan and a clean image look identical. 
 
 **`images.gates.vulnerability`** in the config file moves the vulnerability check and
 nothing else. `always`, the default, fails every caller event. `release` fails a release
-and, on a `pull_request`, writes the findings to the job summary and passes.
+and, on a `pull_request`, warns and passes.
 
 ```yaml
 images:
@@ -148,11 +153,15 @@ change nothing near an image, and the contributor cannot act on any of them.
 **The wrong-image check is never relaxed**, under either value. Relaxing it would let a
 broken scan read as a clean image.
 
-Both values print the findings to the step log. `release` adds the job summary table.
+Both values report the same thing. Each image writes one block to the job summary on every
+caller event, holding its suppressed findings and its findings, and prints both to the step
+log. The gate value decides which events a finding fails, never whether it is reported.
 
 Not covered by this repository's caller test: the advisory branch needs an image carrying
 HIGH or CRITICAL findings, and `_test-docker-hub-publish.yml` builds `fixture-image` from
-`scratch` precisely so the required check cannot fail on a CVE published against a base.
+`scratch` precisely so the required check cannot fail on a CVE published against a base. A
+populated suppressed table is uncovered for the same reason - an image with no packages has
+nothing to suppress - so the caller test covers the `Nothing suppressed.` line alone.
 A second call job is not the way round it either, because the `compose` job's artifact
 name is the fixed literal `compose-files` and two calls in one run collide on it. The
 branch is verified in the consuming repository.
