@@ -295,24 +295,6 @@ A major bump means `v1` stops moving. You stay on 1.x until you change the pin t
 See the [changelog](CHANGELOG.md) for what each release contained, and
 [releases](https://github.com/TomBorglum/workflows/releases) for the generated notes.
 
-## Constraints worth knowing before you call one
-
-These are GitHub's, not this repository's, and they shape how it is laid out:
-
-- **The path is fixed.** A reusable workflow is addressed as
-  `OWNER/REPO/.github/workflows/FILE@REF`. Subdirectories are not addressable, so
-  every workflow here is a flat file in `.github/workflows/` and all of the structure
-  lives in the filenames.
-- **This repository is public on purpose.** A *public* caller can only call reusable
-  workflows in *public* repositories. A private caller can call either.
-- **There are no redirects.** GitHub deliberately does not redirect renamed actions
-  or reusable workflows — if this repository were renamed, every `uses:` referencing
-  it would start failing. The name is permanent.
-- **`env` does not cross the boundary**, in either direction. Values go in as
-  `inputs` and come back as `outputs`.
-- **Nesting is capped** at 10 levels deep, and 50 unique reusable workflows per
-  caller file (counting nested trees).
-
 ## Guardrails
 
 `main` is protected by a repository ruleset: pull requests only, linear history, no
