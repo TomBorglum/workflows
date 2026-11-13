@@ -2,31 +2,16 @@ name: Docker Hub publish
 
 # Builds, scans and publishes one image per directory its config file declares, then publishes
 # one OCI compose artifact per compose project the same file declares. Called, never triggered.
-# It names no repository and no file outside the config and the directories the config declares,
-# and sets exactly two variables in a compose file: IMAGE_PREFIX and IMAGE_TAG.
+# docs/docker-hub-publish.md is the caller's reference; README.md documents the config file.
 #
-# The config file holds the image interface because GitHub Actions has no hierarchical input
-# syntax. `trivyignores` and `vex-documents` are per directory and resolve against that
-# directory; as inputs they applied to the union of every image built, so a finding accepted
-# for one image was accepted for all of them. The remaining inputs describe the caller's
-# environment.
-#
-# Two invariants. Breaking either is a security regression:
+# Three invariants. Breaking any of them is a security regression:
 #   - No job that checks the repository out gets `id-token: write`.
 #   - Nothing here reads `vars` or names an AWS object.
+#   - No checkout step is added to resolve a TomBorglum/actions reference. The runner fetches
+#     those into its own action cache, never into GITHUB_WORKSPACE.
 # The logs are world-readable, so nothing added may print the account id or the PAT.
-# docs/docker-hub-publish.md documents the AWS objects and the credential path.
-#
-# The OIDC exchange is TomBorglum/actions/aws/assume-role, pinned to a 40-char SHA in `push`.
-# The runner fetches it into its own action cache, not into GITHUB_WORKSPACE: a checkout step
-# must never be added to make it resolve. A composite action appears in no OIDC claim, so the
-# role's trust policy pins this file's `job_workflow_ref` on a `v*.*.*` tag.
-#
-# The same holds for TomBorglum/actions/direnv/setup in `meta`: `meta` does check the
-# repository out, but neither action resolves from that checkout.
 
-# Every `github.*` reference below resolves to the caller's event. The caller carries the
-# triggers and the concurrency group.
+# Every `github.*` reference below resolves to the caller's event.
 on:
   workflow_call:
     inputs:
@@ -98,27 +83,19 @@ jobs:
       # JSON arrays, because `strategy` resolves the matrix through `fromJSON`.
       image-directories: ${{ steps.images.outputs.image-directories }}
       compose-directories: ${{ steps.images.outputs.compose-directories }}
-      # One output per config key, each mapping a directory to its own resolved paths and read
-      # per matrix leg as image-repositories is.
       trivyignores: ${{ steps.images.outputs.trivyignores }}
       vex-documents: ${{ steps.images.outputs.vex-documents }}
       vulnerability-gate: ${{ steps.images.outputs.vulnerability-gate }}
     steps:
-      # `strategy` below cannot read a file, so the config is parsed into a job output here, and
-      # the checks that a directory holds a Dockerfile and that a named suppression file is
-      # present need the repository rather than the config alone. This job has no
-      # `id-token: write` and executes nothing it checks out, unlike `build` and `compose`.
+      # The matrix needs the config as a job output, and the filesystem checks below need the
+      # repository. Nothing checked out in this job is executed.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # This workflow's own source, for the schema and the validator. `actions/checkout`
-      # inside a called workflow checks out the caller, hence the explicit repository and
-      # ref: `job.workflow_sha` is the commit of the workflow running, so a caller pinned to
-      # @v2.0.0 validates against v2.0.0's schema. `job.workflow_*` is unavailable on GitHub
-      # Enterprise Server; this repository targets github.com.
-      #
-      # Nothing in this checkout is executed.
+      # This workflow's own source, for the schema and the validator: `actions/checkout` in a
+      # called workflow checks out the caller, and `job.workflow_sha` is what makes a caller
+      # pinned to @v2.0.0 validate against v2.0.0's schema. Nothing here is executed.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
@@ -126,8 +103,7 @@ jobs:
           path: workflow-source
           persist-credentials: false
 
-      # From the pixi workspace in the checkout above, never the runner image. pixi.toml
-      # records why pixi and what bumps it.
+      # From the pixi workspace in the checkout above, never the runner image.
       - name: Provide the config validator
         uses: TomBorglum/actions/direnv/setup@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
         with:
@@ -135,9 +111,6 @@ jobs:
 
       # Shape, before anything reads through it. The `images` step below keeps only the
       # checks a schema cannot make, which are the ones about the filesystem.
-      #
-      # The schema is read from the checkout rather than fetched: a caller pinned to a
-      # version must validate against that version's schema.
       - name: Validate the config against the schema
         env:
           CONFIG: ${{ inputs.config }}
@@ -148,9 +121,8 @@ jobs:
             exit 1
           fi
 
-          # -o json, so each error becomes one annotation on the config file. The validator
-          # reports a JSON path and no line number, so the path travels in the message and
-          # `line` keeps its default of 1.
+          # One annotation per error. The validator reports no line number, so the JSON
+          # path travels in the message and `line` keeps its default of 1.
           if check-jsonschema -o json \
             --schemafile workflow-source/schema/docker-hub-publish.json \
             "$CONFIG" > /tmp/validation.json; then
@@ -173,11 +145,7 @@ jobs:
 
       # The image name is composed here and nowhere else: <namespace>/<repository>-<dir>, read
       # back from `image-list` and `image-map` so no consumer can spell one differently.
-      # `image-list` is comma-joined because metadata-action splits `images` on newlines only,
-      # then CSV-parses each line. Single-line outputs for the reason the bake step gives.
-      #
-      # Every check runs before any image is built: a mistyped suppression path reaching the
-      # scan would be a suppression that silently does not load.
+      # `image-list` is comma-joined because metadata-action splits `images` on newlines only.
       - name: Read the config and compose the repository each directory publishes to
         id: images
         env:
@@ -187,30 +155,26 @@ jobs:
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
 
-          # `required` is satisfied by a key being present, and an unset variable reaches
-          # a called workflow as an empty string. Not in the schema: it is an input, and the
-          # schema governs the config file alone.
+          # `required` is satisfied by a key being present, and an unset variable arrives
+          # as the empty string. Not in the schema, which governs the config file alone.
           if [[ ! "$DOCKERHUB_NAMESPACE" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
             fail "dockerhub-namespace must be lowercase letters, digits, - or _, got: '$DOCKERHUB_NAMESPACE'"
           fi
 
           # A missing binary would otherwise surface as a jq parse error on an empty file.
           command -v yq > /dev/null || fail "yq is not on PATH"
-          # One conversion, so every read below is jq on JSON rather than two query
-          # languages. The shape is already validated above, so nothing here re-checks a
-          # type or an enum.
+          # One conversion, so every read below is jq rather than two query languages. The
+          # shape is validated above, so nothing here re-checks a type or an enum.
           yq -o=json '.' "$CONFIG" > /tmp/config.json
 
-          # `keys_unsorted`, so the file's order is the matrix's order. A directory declared
-          # twice never reaches here: duplicate keys are a YAML error, which is why both
-          # collections are mappings rather than lists.
+          # `keys_unsorted`, so the file's order is the matrix's order. Duplicate keys are a
+          # YAML error, which is why both collections are mappings rather than lists.
           jq -r '.images.directories | keys_unsorted[]' /tmp/config.json > /tmp/image-directories
           jq -r '.["compose-projects"] // {} | keys_unsorted[]' /tmp/config.json \
             > /tmp/compose-directories
 
-          # What the schema cannot know: the filesystem. Checked before any image is built,
-          # because a mistyped suppression path reaching the scan would be a suppression
-          # that silently does not load.
+          # What the schema cannot know: the filesystem. Before any image is built, because a
+          # mistyped suppression path reaching the scan suppresses nothing and says nothing.
           while read -r directory; do
             [ -d "$directory" ] || fail "images.directories.$directory: no such directory"
             for required in Dockerfile docker-bake.hcl; do
@@ -240,9 +204,7 @@ jobs:
           gate="$(jq -r '.images.gates.vulnerability // "always"' /tmp/config.json)"
           printf 'vulnerability-gate=%s\n' "$gate" >> "$GITHUB_OUTPUT"
 
-          # The prefix every name below is built on, and what `push` exports to compose as
-          # IMAGE_PREFIX. A compose artifact follows the same formula as an image, so the two
-          # halves differ in nothing but which mapping they read.
+          # The prefix every name below is built on, and what `push` exports as IMAGE_PREFIX.
           prefix="$DOCKERHUB_NAMESPACE/$REPOSITORY"
           printf 'image-prefix=%s\n' "$prefix" >> "$GITHUB_OUTPUT"
 
@@ -254,10 +216,8 @@ jobs:
             | sed 's/^/compose-directories=/' >> "$GITHUB_OUTPUT"
 
           # Each image's own paths, prefixed with its directory because that is what they
-          # resolve against, then joined into the one comma-separated string that
-          # trivy-action's `trivyignores` input and TRIVY_VEX each take. The config file
-          # declares a list and refuses a comma inside an element, so the join happens here
-          # and nowhere else. One output per config key, carrying that key's name.
+          # resolve against, then comma-joined for `trivyignores` and TRIVY_VEX. The config
+          # file refuses a comma inside an element, so the join happens here and nowhere else.
           for key in trivyignores vex-documents; do
             jq -c --arg k "$key" '
               .images.directories
@@ -291,23 +251,18 @@ jobs:
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta-images
         with:
-          # The target every directory's bake file declares; the action's own default is
-          # `docker-metadata-action`, which no bake file declares.
+          # Not the action's own default, which no bake file declares.
           bake-target: image
-          # Every image, so one derivation serves them all; `push` selects each image's
-          # lines by its `<image>:` prefix.
+          # Every image, so one derivation serves them all; `push` selects each by its
+          # `<image>:` prefix.
           images: ${{ steps.images.outputs.image-list }}
-          # Turns off the implicit "latest on any semver tag", so that tag is declared in
-          # TAG_PATTERNS like every other. Both derivations need it.
           flavor: latest=false
           tags: ${{ env.TAG_PATTERNS }}
 
-      # Derived separately rather than as further names above: `push` diffs the repositories
-      # the image artifacts carry against the ones the derived tags name, and a compose file
-      # has no image artifact, so a name there would abort every release.
+      # Derived separately rather than as further names above: `push` diffs the artifacts'
+      # repositories against the derived tags, and a compose file has no image artifact.
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta-compose
-        # The step's own output, not a `needs` one: this runs inside the job that produced it.
         if: steps.images.outputs.compose-directories != '[]'
         with:
           images: ${{ steps.images.outputs.compose-list }}
@@ -349,7 +304,6 @@ jobs:
           # A job holding repository code must not also hold a credential for it.
           persist-credentials: false
 
-      # The release metadata, written back out as bake files the build step loads first.
       - name: Stage the shared bake overrides
         env:
           LABELS: ${{ needs.meta.outputs.bake-labels }}
@@ -371,9 +325,7 @@ jobs:
           # What the directory's bake file expects, and what a caller's own local build
           # task passes too, so CI and a workstation build the same image.
           source: ${{ matrix.directory }}
-          # Order is load-bearing and nothing reports it: the last file wins the keys it
-          # names, so the directory's own file goes last.
-          # docs/docker-hub-publish.md states the pair.
+          # Order is load-bearing and nothing reports it: the last file wins the keys it names.
           files: |
             /tmp/bake/labels.json
             /tmp/bake/annotations.json
@@ -384,10 +336,8 @@ jobs:
           # where the artifact lands is this workflow's decision, not the directory's.
           set: |
             image.output=type=oci,dest=/tmp/image.oci.tar
-          # Spelled out because `provenance: true` would leave BuildKit's own `mode=min`
-          # in force. This publishes the whole GitHub event payload inside the image, which
-          # docs/docker-hub-publish.md records as acceptable only while the calling
-          # repository is public.
+          # Spelled out because `provenance: true` would leave BuildKit's own `mode=min` in
+          # force. docs/docker-hub-publish.md records what mode=max publishes.
           provenance: mode=max
           sbom: true
 
@@ -400,15 +350,8 @@ jobs:
           mkdir -p /tmp/oci
           tar -xf /tmp/image.oci.tar -C /tmp/oci
 
-      # TRIVY_VEX is trivy's own name for `--vex`, as TRIVY_SKIP_VERSION_CHECK below is
-      # for `--skip-version-check`; the action exposes an input for neither.
-      #
-      # It is a string list, so an empty value does not read as "no sources" - it reads as
-      # one source whose path is the empty string, and trivy fails opening it. Hence a
-      # guarded step rather than an `env:` key on the scan below.
-      #
-      # This leg's own sources, read out of `meta`'s map by directory as the repository name
-      # below is.
+      # TRIVY_VEX is a string list, so an empty value reads as one source whose path is the
+      # empty string and trivy fails opening it. Hence a guarded step, not an `env:` below.
       - name: Select the VEX sources for Trivy to use
         if: fromJSON(needs.meta.outputs.vex-documents)[matrix.directory] != ''
         env:
@@ -418,7 +361,6 @@ jobs:
       - name: Scan the ${{ matrix.directory }} image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
-          # `--skip-version-check`, which the action exposes no input for.
           TRIVY_SKIP_VERSION_CHECK: "true"
           TRIVY_SHOW_SUPPRESSED: "true"
         with:
@@ -426,24 +368,15 @@ jobs:
           input: /tmp/oci
           scanners: vuln
           severity: HIGH,CRITICAL
-          # This leg's own files. Empty is safe here, unlike TRIVY_VEX: the action passes no
-          # --ignorefile when the input is empty.
+          # Empty is safe here, unlike TRIVY_VEX: no --ignorefile is passed for an empty input.
           trivyignores: ${{ fromJSON(needs.meta.outputs.trivyignores)[matrix.directory] }}
           format: json
           output: /tmp/trivy.json
           exit-code: 0
 
       # Two checks and a report, because a passing trivy run does not mean this image was
-      # scanned. The wrong-image check runs first, then the report, then the vulnerability
-      # check. Pointed at a layout it cannot walk, trivy resolves the empty config `{}`,
-      # reports nothing and exits 0 - and `{}` declares no platform, which is what the
-      # wrong-image check catches.
-      #
-      # The report is unconditional: a suppressed finding is absent from .Vulnerabilities, so
-      # an image holding ten accepted CVEs otherwise reads exactly like one holding none.
-      #
-      # `images.gates.vulnerability` relaxes the vulnerability check only. Relaxing the
-      # wrong-image check would let a scan of the wrong thing read as a clean image.
+      # scanned. `images.gates.vulnerability` relaxes the vulnerability check only: relaxing
+      # the wrong-image check would let a scan of the wrong thing read as a clean image.
       - name: Gate on the scan
         env:
           DIRECTORY: ${{ matrix.directory }}
@@ -453,8 +386,7 @@ jobs:
           set -euo pipefail
 
           # The platform is what tells an image config from the empty `{}` the attestation
-          # manifest also puts in this layout: `{}` declares none. The read is empty for a
-          # blob that is absent, is not an image config, or declares neither half.
+          # manifest also puts in this layout: `{}` declares none.
           config="$(jq -r '.Metadata.ImageID // ""' /tmp/trivy.json)"
           blob="/tmp/oci/blobs/sha256/${config#sha256:}"
           platform="$(jq -r '[.os, .architecture]
@@ -469,10 +401,9 @@ jobs:
 
           printf '### %s image\n\n' "$DIRECTORY" >> "$GITHUB_STEP_SUMMARY"
 
-          # `.Type` is filtered because the field carries every class of modified finding, so a
-          # scanner added here later would otherwise land in this table. `@tsv` so a missing
-          # statement leaves an empty column rather than shifting the ones after it, and `[]?`
-          # throughout because trivy omits the key entirely when nothing was suppressed.
+          # `.Type` is filtered because the field carries every class of modified finding, so
+          # a scanner added here later would otherwise land in this table. `[]?` throughout
+          # because trivy omits the key entirely when nothing was suppressed.
           suppressed="$(jq -r '.Results[]?.ExperimentalModifiedFindings[]?
                                | select(.Type == "vulnerability")
                                | [.Finding.Severity, .Finding.VulnerabilityID,
@@ -556,13 +487,10 @@ jobs:
           if-no-files-found: error
 
   # `push` checks nothing out, so this job checks every compose directory out on its behalf -
-  # the second job running repository code, hence no `id-token: write`. It gates the project
-  # name, the directory shape, undeclared variables, and that the file loads. A loop rather
-  # than a matrix, and no `if:`: it builds nothing, and a job that always runs never skips,
-  # which is what lets `push` keep the plain `needs` gate on empty input.
+  # the second job running repository code, hence no `id-token: write`. No `if:`: a job that
+  # always runs never skips, which is what lets `push` keep a plain `needs` gate on empty
+  # input.
   compose:
-    # Reads a `meta` output, so it waits on a job that takes seconds. No `if:` even so - see
-    # the comment above.
     needs: meta
     runs-on: ubuntu-latest
     permissions:
@@ -598,9 +526,8 @@ jobs:
               # Required by SonarCloud's default-case rule; the `case` already fell through.
               *) ;;
             esac
-            # <repository>-<directory>, the formula the images and the artifact follow, so
-            # a deployer reads the project, network and volume off the artifact reference.
-            # The declared key: `config .name` would show a COMPOSE_PROJECT_NAME override.
+            # The declared key, not `config`'s resolved `.name`, which would accept a
+            # COMPOSE_PROJECT_NAME override. docs/docker-hub-publish.md states the formula.
             expected="$REPOSITORY-$directory"
             declared="$(sed -n 's/^name:[[:space:]]*//p' "$directory/compose.yaml" \
               | head -1 | tr -d "\"' ")"
@@ -615,13 +542,8 @@ jobs:
             cp -R "$directory/." "/tmp/compose-files/$directory/"
             docker compose -f "$directory/compose.yaml" --profile '*' config --variables \
               --format json > /tmp/variables.json
-            # `publish` uploads this file uninterpolated - verified against a published
-            # artifact - so a deploy host resolves every name below itself, with no .env
-            # and none of the placeholders staged here. A `:?` fails naming the variable
-            # and a `:-` default renders deliberately, but a bare ${...} renders an empty
-            # string and says nothing, which is what this refuses. The default travels
-            # inside the artifact; .env does not, so whether the caller keeps one is not
-            # checked.
+            # A bare ${...} renders an empty string and says nothing, where a `:?` fails
+            # naming the variable. docs/docker-hub-publish.md states what is published.
             for name in $(jq -r 'to_entries[]
               | select(.value.Required | not)
               | select(.value.DefaultValue == "") | .key' /tmp/variables.json); do
@@ -645,10 +567,9 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compose-files
-          # Hidden files are excluded by default, which is exactly the .env files.
           path: /tmp/compose-files/
+          # The .env and placeholder files, which are excluded by default.
           include-hidden-files: true
-          # The image archives' retention, for the same reason.
           retention-days: 1
           if-no-files-found: error
 
@@ -796,11 +717,8 @@ jobs:
           done
 
       # After the copy above, which is why this step lives in this job at all:
-      # --resolve-image-digests reads each digest back out of the registry. One publish per
-      # tag, each resolving against that tag's own images. IMAGE_PREFIX and IMAGE_TAG are the
-      # only two names this workflow puts into a compose file, and the shell environment
-      # outranks both files below: the placeholders the `compose` job staged, and the
-      # directory's own .env.
+      # --resolve-image-digests reads each digest back out of the registry. The shell
+      # environment outranks both --env-file arguments below.
       - name: Publish every compose file to Docker Hub
         env:
           COMPOSE_TAGS: ${{ needs.meta.outputs.compose-tags }}
@@ -863,7 +781,6 @@ jobs:
             cosign sign --yes "$(cat "$dir/repository")@$(cat "$dir/digest")"
           done
           # cosign signs a digest, so the artifact's media type is nothing it has to know.
-          # Empty when no compose directory was given.
           while read -r ref; do
             [ -n "$ref" ] || continue
             cosign sign --yes "$ref"

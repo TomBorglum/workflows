@@ -1,55 +1,14 @@
 name: docker-hub-publish test
 
-# This repository's own CI, not a reusable workflow - hence the leading underscore.
-#
 # Calls docker-hub-publish.yml by local path, so the branch's version runs rather than a
-# released tag. It builds the image fixtures and validates fixture-compose, then asserts what a
-# consumer would notice if it broke.
+# released tag. The workflow declares no workflow_call outputs, so what `assert` reads back
+# are the two artifacts `push` would have consumed.
 #
-# Every fixture is a top-level directory, forced twice over: the compose job refuses a nested
-# directory, and the build job's artifact is named `image-<directory>`, which upload-artifact
-# rejects if the name contains a slash. Nesting a fixture breaks this test in two places.
+# Every fixture stays a top-level directory: nesting one breaks this test twice over, in the
+# compose job's own refusal and in the `image-<directory>` artifact name.
 #
-# The workflow declares no workflow_call outputs, so there is nothing to assert the way
-# _test-update-pixi-dependencies.yml asserts its own. What crosses the boundary are the two
-# artifacts the `push` job would consume, and those are what `assert` reads back.
-#
-# `push` is the job with the credential, and it carries `if: github.event_name == 'release'` of
-# its own. On a pull_request it skips: nothing is published and no AWS call is made.
-#
-# `id-token: write` is granted below and has to be, even though the job that uses it skips. A
-# called workflow may not request more than the caller grants, and GitHub checks that when the
-# run starts rather than when the job would run, so withholding it fails the whole run with
-# `startup_failure` and no job logs. The grant is a ceiling, not a use.
-#
-# The `secrets:` block passes a syntactically valid but fake role ARN. `aws-role-arn` is
-# declared required, and a literal rather than a repository secret is what keeps this green on
-# a fork pull request, where secrets are never available. Nothing ever assumes it: the only step
-# that reads it is in `push`.
-#
-# The config file is .github/fixtures/docker-hub-publish.yml, passed as `config` because it is
-# not at the input's default path. Nothing here covers that default. The file declares two
-# images: fixture-image with both suppression keys, and fixture-image-plain with none. That
-# pairing proves each matrix leg receives its own paths rather than the union of every image's,
-# which is the defect the config file replaced. `assert` reads both legs' staged paths back to
-# check it.
-#
-# `images.gates` is left out of the config file, asserting the `always` default.
-#
-# The `schema` job tests schema/docker-hub-publish.json independently of a build. A schema's
-# whole job is refusing things, and a rule weakened by a later edit leaves every other test
-# here green.
-#
-# The `release` branch of the vulnerability gate is not covered here and cannot be. It needs an
-# image carrying HIGH or CRITICAL findings, while fixture-image is FROM scratch precisely so
-# this repository's required check cannot fail on a CVE published against a base. A second call
-# job with a vulnerable fixture does not work either: the `compose` job uploads the fixed
-# literal name `compose-files`, so two calls in one run collide on that artifact. The branch is
-# verified in the consuming repository - docs/docker-hub-publish.md records it.
-#
-# Deliberately not path-filtered. When a filter excludes a pull request the checks stay Pending
-# rather than passing, so a required check over a filtered workflow deadlocks the pull request
-# permanently.
+# Deliberately not path-filtered. A filter that excludes a pull request leaves the checks
+# Pending rather than passing, which deadlocks a required check permanently.
 
 on:
   pull_request:
@@ -105,11 +64,13 @@ jobs:
   call:
     uses: ./.github/workflows/docker-hub-publish.yml
     # A ceiling the called workflow can only lower, which `build` and `compose` both do.
+    # Granted although `push` skips here: the ceiling is validated when the run starts.
     permissions:
       contents: read
       id-token: write
     with:
-      # Declares both image directories and the compose project.
+      # Two images, one carrying both suppression keys and one carrying none, so each
+      # matrix leg's own paths are observable. Omits `images.gates`, asserting its default.
       config: .github/fixtures/docker-hub-publish.yml
       # Well-formed but inert. Everything that validates them runs in `push`, which skips
       # here, so these only have to satisfy the declarations.
@@ -117,6 +78,8 @@ jobs:
       aws-ssm-parameter: /fixture/release/dockerhub-pat
       dockerhub-namespace: fixture-namespace
     secrets:
+      # A literal rather than a repository secret, so this stays green on a fork pull
+      # request. Never assumed: the only step that reads it is in `push`.
       aws-role-arn: arn:aws:iam::000000000000:role/fixture-never-assumed
 
   assert:
@@ -145,10 +108,8 @@ jobs:
           set -euo pipefail
           ls -la /tmp/image /tmp/image-plain
 
-          # The name formula, which is the one thing a consumer cannot recover if it changes:
-          # <namespace>/<repository>-<directory>. The namespace is the input above, the
-          # repository is this one, and the directory is the matrix leg - which now comes from
-          # the config file rather than from an input.
+          # The name formula, which is the one thing a consumer cannot recover if it
+          # changes: <namespace>/<repository>-<directory>.
           for leg in 'image:fixture-image' 'image-plain:fixture-image-plain'; do
             path="/tmp/${leg%%:*}"
             directory="${leg#*:}"
@@ -169,10 +130,8 @@ jobs:
             tar -tf "$path/image.oci.tar" | grep -qx 'index.json'
           done
 
-      # trivyignores and vex-documents were inputs, so one list reached every image's scan and
-      # a finding accepted for one image was accepted for all of them. They are per directory
-      # now, and these two legs differ, so the old union behaviour would show up here as
-      # fixture-image-plain carrying fixture-image's paths.
+      # The two legs declare different paths, so a list reaching every image's scan shows
+      # up here as fixture-image-plain carrying fixture-image's paths.
       - name: Assert each image got its own trivyignores and vex-documents
         run: |
           set -euo pipefail
@@ -180,13 +139,11 @@ jobs:
             /tmp/image-plain/trivyignores /tmp/image-plain/vex-documents
 
           # Prefixed with the image's own directory, which is what makes a suppression an
-          # acceptance for one image: two images cannot name one file, so they diverge the
-          # day one of them is fixed rather than masking the other's regression.
+          # acceptance for one image rather than for every image.
           test "$(cat /tmp/image/trivyignores)" = 'fixture-image/.trivyignore.yaml'
           test "$(cat /tmp/image/vex-documents)" = 'fixture-image/fixture.openvex.json'
 
-          # Empty, not inherited. Empty is also why the TRIVY_VEX step stays guarded: the
-          # variable is a string list, so one empty path reads as a source trivy cannot open.
+          # Empty, not inherited. Empty is also why the TRIVY_VEX step stays guarded.
           test "$(cat /tmp/image-plain/trivyignores)" = ''
           test "$(cat /tmp/image-plain/vex-documents)" = ''
 
@@ -201,16 +158,13 @@ jobs:
 
           test -f /tmp/compose/fixture-compose/compose.yaml
 
-          # The fixture carries no .env: every name in its compose file holds a `:?` or a
-          # `:-`, so the compose job staged and validated a directory without one. A caller
-          # needing an .env to publish would be a regression of the gate this asserts against.
+          # The fixture carries no .env, so a caller needing one to publish would be a
+          # regression of the gate this asserts against.
           test ! -e /tmp/compose/fixture-compose/.env
 
           # Every interpolated name, placeholdered so `publish` can load a file holding no
-          # values - `${FIXTURE_MESSAGE:?...}` would abort the load otherwise. It leaves no
-          # trace in the artifact: the compose file is published uninterpolated. This file is
-          # hidden, so its presence is also the assertion that include-hidden-files is still
-          # set on the upload.
+          # values. The file is hidden, so its presence is also the assertion that
+          # include-hidden-files is still set on the upload.
           placeholders=/tmp/compose/fixture-compose/.placeholders.env
           test -f "$placeholders"
           for name in IMAGE_PREFIX IMAGE_TAG FIXTURE_MESSAGE; do
@@ -218,12 +172,9 @@ jobs:
               echo "::error::$name missing from .placeholders.env"; exit 1; }
           done
 
-  # One required check covering the whole file. Its name is load-bearing: the main-protection
-  # ruleset requires a status check named exactly "Tests pass", so a job named anything else
-  # never reports that context and the pull request stays blocked.
-  #
-  # if: always() so a failed job above is reported here as a failure rather than leaving
-  # the required check Pending forever.
+  # One required check covering the whole file. `name:` is the status check context the
+  # main-protection ruleset requires, so renaming it blocks every pull request.
+  # `always()`, so a failed job above fails this check rather than leaving it Pending.
   tests-pass:
     name: Tests pass
     if: always()
