@@ -401,7 +401,7 @@ jobs:
       #
       # This leg's own sources, read out of `meta`'s map by directory as the repository name
       # below is.
-      - name: Select the VEX sources
+      - name: Select the VEX sources for Trivy to use
         if: fromJSON(needs.meta.outputs.vex-documents)[matrix.directory] != ''
         env:
           VEX_DOCUMENTS: ${{ fromJSON(needs.meta.outputs.vex-documents)[matrix.directory] }}
