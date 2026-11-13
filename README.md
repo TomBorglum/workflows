@@ -237,9 +237,8 @@ Paths in `trivyignores` and `vex-documents` resolve against the image's own dire
 absolute path, a path containing a `..` component and a path containing a comma are each
 refused. `docs/docker-hub-publish.md` covers why a suppression belongs to one image.
 
-Every suppression is reported. Each run lists the HIGH and CRITICAL findings that a
-`trivyignores` entry or a `vex-documents` statement suppressed, with the file that suppressed
-each one, in the step log and the job summary.
+Every run lists what each image suppressed, with the file that suppressed it, in the step log
+and the job summary.
 
 A directory declared twice is a YAML duplicate-key error.
 

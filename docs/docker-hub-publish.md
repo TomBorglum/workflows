@@ -119,19 +119,10 @@ what expires. Unreachability is a property of the image and does not rot, so a V
 statement carries a justification and no date; a finding merely waiting for a fix keeps
 a dated `.trivyignore` entry.
 
-Every run reports what it suppressed. The scan passes `--show-suppressed`, so the step log and
-the job summary list each suppressed HIGH or CRITICAL finding with the status that suppressed
-it - `ignored` for a `.trivyignore` entry, `not_affected` or `fixed` for a VEX statement - the
-file it came from and its statement. An image that suppressed nothing reports
-`Nothing suppressed.`, which is what separates an image holding no acceptances from a report
-that was never written.
-
-An expired `.trivyignore` entry leaves the suppressed list and appears as a finding, so an
-acceptance that lapsed reads as the finding it always was.
-
-Suppressed findings below HIGH are never reported. Trivy filters by severity before it matches
-a suppression, and the scan asks for `HIGH,CRITICAL`, so a suppressed MEDIUM finding was never
-scanned for.
+Every run reports what it suppressed, in the step log and the job summary: each suppressed
+HIGH or CRITICAL finding, its status, the file that suppressed it and its statement. An image
+that suppressed nothing reports `Nothing suppressed.`. A suppressed MEDIUM or lower finding is
+never listed, because the scan asks for `HIGH,CRITICAL` alone.
 
 ## Which events a HIGH or CRITICAL finding fails
 
