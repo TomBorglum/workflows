@@ -420,15 +420,6 @@ jobs:
         env:
           # `--skip-version-check`, which the action exposes no input for.
           TRIVY_SKIP_VERSION_CHECK: "true"
-          # `--show-suppressed`, which the action exposes no input for either. It adds
-          # ExperimentalModifiedFindings to the report - the findings a trivyignore entry or a
-          # VEX statement took out of .Vulnerabilities - and changes neither that list nor the
-          # exit code, so the gate below fails on exactly what it failed on before.
-          #
-          # The flag is EXPERIMENTAL, which is what the key's name records. A rename upstream
-          # empties the suppressed table rather than erroring, so nothing would report that the
-          # report stopped working; the action is pinned by digest, so a rename can only arrive
-          # with a deliberate bump of that pin.
           TRIVY_SHOW_SUPPRESSED: "true"
         with:
           scan-type: image
@@ -442,19 +433,17 @@ jobs:
           output: /tmp/trivy.json
           exit-code: 0
 
-      # Three parts: the wrong-image check, the suppression report, the vulnerability check,
-      # in that order. A passing trivy run does not mean this image was scanned - pointed at a
-      # layout it cannot walk, trivy resolves the empty config `{}`, reports nothing and exits
-      # 0 - and `{}` declares no platform, which is what the wrong-image check catches. So that
-      # check runs first and nothing else is believed until it passes.
+      # Two checks and a report, because a passing trivy run does not mean this image was
+      # scanned. The wrong-image check runs first, then the report, then the vulnerability
+      # check. Pointed at a layout it cannot walk, trivy resolves the empty config `{}`,
+      # reports nothing and exits 0 - and `{}` declares no platform, which is what the
+      # wrong-image check catches.
       #
-      # The report is written on every event, because a suppressed finding is absent from
-      # .Vulnerabilities and an image carrying ten accepted CVEs otherwise reads exactly like
-      # an image carrying none.
+      # The report is unconditional: a suppressed finding is absent from .Vulnerabilities, so
+      # an image holding ten accepted CVEs otherwise reads exactly like one holding none.
       #
       # `images.gates.vulnerability` relaxes the vulnerability check only. Relaxing the
-      # wrong-image check would let a scan of the wrong thing read as a clean image, and
-      # relaxing the report would hide the acceptances it exists to show.
+      # wrong-image check would let a scan of the wrong thing read as a clean image.
       - name: Gate on the scan
         env:
           DIRECTORY: ${{ matrix.directory }}
@@ -478,22 +467,12 @@ jobs:
           fi
           echo "scanned $DIRECTORY: $config ($platform)"
 
-          # One heading per leg. Each matrix leg is its own job and writes its own summary, so
-          # the heading says which image the tables below it belong to.
           printf '### %s image\n\n' "$DIRECTORY" >> "$GITHUB_STEP_SUMMARY"
 
-          # What TRIVY_SHOW_SUPPRESSED put in the report. `.Type` is filtered because the field
-          # carries every class of modified finding, and this scan asks for `vuln` only - a
-          # future scanner here would otherwise appear in the vulnerability table.
-          #
-          # @tsv rather than an interpolated string: an empty statement must leave an empty
-          # column rather than shift every column after it. Every step is `[]?` so a report
-          # without the key - which is what trivy writes when nothing was suppressed - reads as
-          # empty instead of failing the step.
-          #
-          # Severity filtering runs before suppression matching, so this holds HIGH and
-          # CRITICAL entries only, matching what the check below fails on. A suppressed LOW
-          # finding is never reported and never was scanned for.
+          # `.Type` is filtered because the field carries every class of modified finding, so a
+          # scanner added here later would otherwise land in this table. `@tsv` so a missing
+          # statement leaves an empty column rather than shifting the ones after it, and `[]?`
+          # throughout because trivy omits the key entirely when nothing was suppressed.
           suppressed="$(jq -r '.Results[]?.ExperimentalModifiedFindings[]?
                                | select(.Type == "vulnerability")
                                | [.Finding.Severity, .Finding.VulnerabilityID,
@@ -508,15 +487,14 @@ jobs:
               printf '%s suppressed HIGH or CRITICAL finding(s), accepted by this image via its `trivyignores` or `vex-documents`.\n\n' "$suppressed_count"
               printf '| Severity | ID | Package | Status | Source | Statement |\n'
               printf '| --- | --- | --- | --- | --- | --- |\n'
-              # The statement is repository-authored prose, so a `|` in it would end its cell
-              # and shift the row. Escaped here rather than in jq, where the escape would also
-              # reach the step log above.
+              # A `|` in a statement would end its cell. Escaped here rather than in jq,
+              # where it would reach the step log above too.
               printf '%s\n' "$suppressed" | sed 's/|/\\|/g' \
                 | awk -F'\t' '{printf "| %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6}'
               printf '\n'
             } >> "$GITHUB_STEP_SUMMARY"
-            # A notice, not a warning: a suppression is an accepted finding, and an amber run
-            # on every build is what a repository holding one standing acceptance would get.
+            # A notice, not a warning: a repository holding one standing acceptance would
+            # otherwise warn on every build.
             echo "::notice::$suppressed_count suppressed HIGH or CRITICAL finding(s) in the $DIRECTORY image, accepted by its trivyignores or vex-documents."
           else
             echo "nothing suppressed"
