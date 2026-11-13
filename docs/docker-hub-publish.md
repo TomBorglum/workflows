@@ -34,10 +34,18 @@ policy below is unaffected by it.
 | A `compose.yaml` declaring `name: <repository>-<directory>` per compose directory | Gated. See [What fails a release](#what-fails-a-release) |
 | Non-nested directories | `compose` refuses a nested directory, and the build artifact is named `image-<directory>`, which cannot contain a slash |
 | A Docker Hub namespace matching the PAT's own account | Nothing checks it |
+| github.com, not GitHub Enterprise Server | `meta` checks out this workflow's own source for the schema, which needs the `job.workflow_repository` and `job.workflow_sha` contexts. Neither exists on GHES |
 | The AWS objects below | |
 
 No `.env` file is required beside a compose file, and no `.trivyignore` file is required
 anywhere: an image with nothing to suppress is one key in the config file and no more.
+
+The config file holds everything that is per image or per compose project, because GitHub
+Actions has no hierarchical input syntax. The four inputs describe the caller's AWS and
+Docker Hub environment and nothing else.
+
+This workflow names no repository and no file outside the config file and the directories
+that config declares.
 
 `push` runs on the `release` event alone. Every other event builds, scans and gates, and
 publishes nothing.
@@ -80,6 +88,9 @@ Four tags are published per image, and per compose artifact, derived from the re
 
 `latest=false` is set on the derivation, so `latest` is declared like any other pattern
 rather than implied by a semver tag, and it is applied on the `release` event alone.
+
+The semver patterns resolve on a tag ref only. On every other caller event the derivation
+yields `sha-<full commit>` and nothing else.
 
 ## What fails a release
 
