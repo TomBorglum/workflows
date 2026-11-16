@@ -140,14 +140,14 @@ jobs:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
       - name: Install pixi from the workspace's .envrc
-        uses: TomBorglum/actions/direnv/setup@f3028cddd68f2efc77b63a3f4fd749e541c8701c # v3.1.0
+        uses: TomBorglum/actions/direnv/setup@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
         with:
           working-directory: ${{ inputs.working-directory }}
           stub-directives: ${{ inputs.stub-directives }}
 
       - name: Upgrade pixi dependencies
         id: upgrade
-        uses: TomBorglum/actions/pixi/upgrade-dependencies@f3028cddd68f2efc77b63a3f4fd749e541c8701c # v3.1.0
+        uses: TomBorglum/actions/pixi/upgrade-dependencies@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
         with:
           working-directory: ${{ inputs.working-directory }}
           pinning-strategy: ${{ inputs.pinning-strategy }}
@@ -204,7 +204,7 @@ jobs:
       - name: Create pull request
         id: cpr
         if: ${{ !inputs.dry-run && steps.upgrade.outputs.changed == 'true' }}
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
         with:
           token: ${{ steps.app-token.outputs.token }}
           sign-commits: true
