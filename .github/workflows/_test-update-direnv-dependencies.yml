@@ -1,0 +1,87 @@
+name: update-direnv-dependencies test
+
+# Exercises update-direnv-dependencies.yml by calling it the way a consumer would, by
+# local path so the branch's version runs rather than a released tag. It upgrades
+# fixture-direnv-outdated and asserts the declared outputs reach the caller and that an
+# omitted optional input falls back to its default. CONTRIBUTING.md states what a caller
+# test covers.
+#
+# `dry-run: true` needs no secrets, which is what keeps this green on a fork pull request.
+# The aggregate job below is a required check, and one that cannot run blocks the merge
+# permanently.
+#
+# create-pull-request itself is not covered and cannot be: a job that calls a reusable
+# workflow takes no `continue-on-error`, so the only alternative is a run that opens a real
+# pull request. That half is verified by a workflow_dispatch after release.
+#
+# Deliberately NOT path-filtered. A filter that excludes a pull request leaves the checks
+# Pending rather than passing, which deadlocks a required check permanently.
+#
+# One unauthenticated HEAD request to github.com is the whole of the network traffic: the
+# upgrade resolves a release and installs nothing.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  call:
+    uses: ./.github/workflows/update-direnv-dependencies.yml
+    with:
+      working-directory: fixture-direnv-outdated
+      dry-run: true
+      # branch and base are omitted on purpose: a dry run opens no pull request, so their
+      # defaults are what makes this call valid without them.
+    # No `secrets:` block, which is itself the assertion that both App secrets are
+    # optional on the dry-run path.
+
+  assert:
+    needs: call
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert the outputs reached the caller
+        env:
+          CHANGED: ${{ needs.call.outputs.changed }}
+          SUMMARY: ${{ needs.call.outputs.summary }}
+          PR_NUMBER: ${{ needs.call.outputs.pull-request-number }}
+          PR_URL: ${{ needs.call.outputs.pull-request-url }}
+        run: |
+          set -euo pipefail
+          printf 'changed=%s\n' "$CHANGED"
+          printf '%s\n' "$SUMMARY"
+
+          # The gate a consumer hangs their own steps off. A dry run that silently did
+          # nothing would leave this false.
+          test "$CHANGED" = 'true'
+
+          # The summary crossed the workflow boundary intact, multi-line and all. The
+          # version is hardcoded for the reason the fixture gives for staying stale.
+          grep -q 'pixi' <<<"$SUMMARY"
+          grep -q '0\.40\.0' <<<"$SUMMARY"
+
+          # No pull request on a dry run, and these are the outputs a consumer would
+          # branch on to find that out.
+          test -z "$PR_NUMBER"
+          test -z "$PR_URL"
+
+  # One required check covering the whole file. `name:` is the status check context the
+  # main-protection ruleset requires, so renaming it blocks every pull request.
+  # `always()`, so a failed job above fails this check rather than leaving it Pending.
+  tests-pass:
+    name: Tests pass
+    if: always()
+    needs: [call, assert]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert every job passed
+        env:
+          CALL: ${{ needs.call.result }}
+          ASSERT: ${{ needs.assert.result }}
+        run: |
+          set -euo pipefail
+          echo "call=$CALL assert=$ASSERT"
+          test "$CALL" = 'success'
+          test "$ASSERT" = 'success'
