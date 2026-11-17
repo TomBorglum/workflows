@@ -1,14 +1,10 @@
 name: update-direnv-dependencies test
 
-# Exercises update-direnv-dependencies.yml by calling it the way a consumer would, by
-# local path so the branch's version runs rather than a released tag. It upgrades
-# fixture-direnv-outdated and asserts the declared outputs reach the caller and that an
-# omitted optional input falls back to its default. CONTRIBUTING.md states what a caller
-# test covers.
+# Calls update-direnv-dependencies.yml by local path, so the branch's version runs rather
+# than a released tag. CONTRIBUTING.md states what a caller test covers.
 #
-# `dry-run: true` needs no secrets, which is what keeps this green on a fork pull request.
-# The aggregate job below is a required check, and one that cannot run blocks the merge
-# permanently.
+# `dry-run: true` needs no secrets, which is what keeps this green on a fork pull request,
+# where secrets are never available.
 #
 # create-pull-request itself is not covered and cannot be: a job that calls a reusable
 # workflow takes no `continue-on-error`, so the only alternative is a run that opens a real
@@ -16,9 +12,6 @@ name: update-direnv-dependencies test
 #
 # Deliberately NOT path-filtered. A filter that excludes a pull request leaves the checks
 # Pending rather than passing, which deadlocks a required check permanently.
-#
-# One unauthenticated HEAD request to github.com is the whole of the network traffic: the
-# upgrade resolves a release and installs nothing.
 
 on:
   pull_request:
@@ -33,8 +26,7 @@ jobs:
     with:
       working-directory: fixture-direnv-outdated
       dry-run: true
-      # branch and base are omitted on purpose: a dry run opens no pull request, so their
-      # defaults are what makes this call valid without them.
+      # branch and base are omitted, which is what proves they are optional.
     # No `secrets:` block, which is itself the assertion that both App secrets are
     # optional on the dry-run path.
 
@@ -53,17 +45,13 @@ jobs:
           printf 'changed=%s\n' "$CHANGED"
           printf '%s\n' "$SUMMARY"
 
-          # The gate a consumer hangs their own steps off. A dry run that silently did
-          # nothing would leave this false.
+          # A dry run that silently did nothing would leave this false.
           test "$CHANGED" = 'true'
 
-          # The summary crossed the workflow boundary intact, multi-line and all. The
-          # version is hardcoded for the reason the fixture gives for staying stale.
+          # The version is hardcoded for the reason the fixture gives for staying stale.
           grep -q 'pixi' <<<"$SUMMARY"
           grep -q '0\.40\.0' <<<"$SUMMARY"
 
-          # No pull request on a dry run, and these are the outputs a consumer would
-          # branch on to find that out.
           test -z "$PR_NUMBER"
           test -z "$PR_URL"
 

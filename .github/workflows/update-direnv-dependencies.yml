@@ -1,16 +1,13 @@
 name: Update direnv dependencies
 
-# Bumps the tool versions pinned by direnv's `use` directives in an .envrc and opens a
-# pull request with the result. README.md documents the caller contract.
+# README.md documents the caller contract.
 #
-# One directive today, `use pixi`. The file is named for the directive family rather than
-# the tool so that adding `use fnm` or `use sdk` is a step, not a rename - and renaming a
-# reusable workflow is a hard break for every caller (CONTRIBUTING.md, "Naming workflow
-# files").
+# Named for the directive family rather than the tool: renaming a reusable workflow breaks
+# every caller, so `use fnm` and `use sdk` have to be able to arrive as steps here
+# (CONTRIBUTING.md, "Naming workflow files").
 #
-# Nothing here installs or runs pixi: direnv/upgrade-pixi reads the directive and resolves
-# the release, so the .envrc is never evaluated. That is why there is no direnv/setup step
-# and no stub-directives input to pass it.
+# No direnv/setup step and no stub-directives input: direnv/upgrade-pixi resolves the
+# release from the directive, so the .envrc is never evaluated.
 #
 # The pull request is opened as a GitHub App, never with GITHUB_TOKEN: an event created
 # with GITHUB_TOKEN triggers no further workflow run, so the caller's own required checks
@@ -21,8 +18,8 @@ on:
     inputs:
       working-directory:
         description: >-
-          Directory containing the .envrc to update. That directory and no other - nothing
-          looks in a parent for one.
+          Directory containing the .envrc to update. That directory and no other - no
+          parent is searched.
         type: string
         required: false
         default: '.'
@@ -33,8 +30,7 @@ on:
         default: 'deps/direnv'
       base:
         description: >-
-          Branch the pull request targets. Empty means the branch that is checked out,
-          which is create-pull-request's own default and right for a scheduled caller.
+          Branch the pull request targets. Empty targets the branch that is checked out.
           A caller triggered by `pull_request` or `release` is in detached HEAD and MUST
           set this, or create-pull-request cannot rebase the change.
         type: string
@@ -42,9 +38,7 @@ on:
         default: ''
       dry-run:
         description: >-
-          Perform the upgrade and report what moved, but open no pull request. Needs
-          neither secret, so it is also how this workflow is tested. The result is in the
-          job summary and in the outputs below.
+          Upgrade and report what moved, but open no pull request. Needs neither secret.
         type: boolean
         required: false
         default: false
@@ -52,18 +46,15 @@ on:
       app-client-id:
         description: >-
           The Client ID of a GitHub App installed on the calling repository, with
-          Contents: read/write and Pull requests: read/write. This is the App's Client ID
-          (App settings -> General -> Client ID), not the numeric App ID. Required unless
-          dry-run is true.
+          Contents: read/write and Pull requests: read/write. Not the numeric App ID.
+          Required unless dry-run is true.
         required: false
       app-private-key:
-        description: >-
-          A private key generated for that same App. Required unless dry-run is true.
+        description: A private key for that same App. Required unless dry-run is true.
         required: false
     outputs:
       changed:
-        description: >-
-          'true' when the .envrc was rewritten, 'false' otherwise.
+        description: "'true' when the .envrc was rewritten, 'false' otherwise."
         value: ${{ jobs.update.outputs.changed }}
       summary:
         description: >-
@@ -75,8 +66,7 @@ on:
           changed, or on a dry run.
         value: ${{ jobs.update.outputs.pull-request-number }}
       pull-request-url:
-        description: >-
-          URL of that pull request. Empty under the same conditions as the number.
+        description: URL of that pull request. Empty under the same conditions.
         value: ${{ jobs.update.outputs.pull-request-url }}
 
 # Every write below goes through the App token, which this block does not govern.
@@ -93,9 +83,9 @@ jobs:
       pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
       pull-request-url: ${{ steps.cpr.outputs.pull-request-url }}
     steps:
-      # Fail here rather than three steps later, naming this workflow and the missing
-      # secret. A `run:` test rather than an `if:` because a secret cannot be referenced
-      # in an `if:` at all, hence the env indirection; unset arrives as the empty string.
+      # A `run:` test rather than an `if:`, because a secret cannot be referenced in an
+      # `if:` at all - hence the env indirection. An unpassed secret arrives as the empty
+      # string.
       - name: Require the App credentials unless this is a dry run
         if: ${{ !inputs.dry-run }}
         env:
@@ -124,7 +114,7 @@ jobs:
           private-key: ${{ secrets.app-private-key }}
 
       # A skipped step's output is the empty string, so a dry run falls through to
-      # github.token and still checks out.
+      # github.token.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
@@ -136,8 +126,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
 
       # The one file the upgrade is allowed to have touched, so nothing else in the
-      # checkout can reach the pull request. The prefix collapses for a '.' working
-      # directory, so the pathspec reads `.envrc` rather than `./.envrc`.
+      # checkout can reach the pull request.
       - name: Resolve the paths to commit
         id: paths
         if: ${{ steps.upgrade.outputs.changed == 'true' }}
@@ -181,8 +170,8 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # No bot identity is resolved here because `sign-commits` below makes the action
-      # ignore the committer and author inputs.
+      # No committer identity is resolved: `sign-commits` makes the action ignore the
+      # committer and author inputs.
       - name: Create pull request
         id: cpr
         if: ${{ !inputs.dry-run && steps.upgrade.outputs.changed == 'true' }}
@@ -197,12 +186,11 @@ jobs:
           commit-message: "deps: update direnv-pinned tool versions"
           title: "deps: update direnv-pinned tool versions"
           body: |
-            Automated upgrade of the tool versions pinned by direnv's `use` directives.
-            Dependabot has no direnv ecosystem, so this is what bumps a version declared
-            in an `.envrc`.
+            Bumps the tool versions pinned by direnv's `use` directives in `.envrc`.
+            Dependabot has no direnv ecosystem.
 
             ${{ steps.upgrade.outputs.summary }}
 
             Produced by
-            [`TomBorglum/workflows/.github/workflows/update-direnv-dependencies.yml`](https://github.com/TomBorglum/workflows/blob/main/.github/workflows/update-direnv-dependencies.yml),
-            which rewrote the `use pixi` directive and committed only `.envrc`.
+            [`TomBorglum/workflows/.github/workflows/update-direnv-dependencies.yml`](https://github.com/TomBorglum/workflows/blob/main/.github/workflows/update-direnv-dependencies.yml).
+            Only `.envrc` is committed.

@@ -1,25 +1,18 @@
 name: Update direnv dependencies
 
 # Calls update-direnv-dependencies.yml by local path, so main's version runs rather than a
-# released tag. What it bumps is the `use pixi` pin in this repository's own .envrc - the
-# pixi every maintainer and every CI job here solves and installs with.
+# released tag. The default working-directory points it at this repository's own .envrc.
 #
-# A day after _update-pixi-dependencies.yml, so the two automated pull requests do not open
-# together: this one rewrites .envrc, that one rewrites pixi.toml and pixi.lock, and a
-# reviewer can take them one at a time.
+# A day after _update-pixi-dependencies.yml, so the two pull requests do not open together.
 #
 # A schedule fires from the default branch alone, so this does nothing until it is merged.
-# The secrets are the tomborglum-workflows-bot App _release-please.yml already uses;
-# nothing further is provisioned. Every input is left at its default.
+# The secrets are the tomborglum-workflows-bot App _release-please.yml already uses.
 #
-# fixture-direnv-outdated is deliberately not covered. Its pin must stay stale for
-# _test-update-direnv-dependencies.yml, and the default working-directory reaches the
-# repository root alone.
+# fixture-direnv-outdated is deliberately not covered: its pin must stay stale for
+# _test-update-direnv-dependencies.yml.
 
 on:
   schedule:
-    # A missed run is a week's delay, not a lost upgrade: the next run upgrades to
-    # whatever is current and updates the same branch.
     - cron: '0 6 * * 2'
   workflow_dispatch:
 
