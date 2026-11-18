@@ -1,0 +1,27 @@
+name: Update direnv dependencies
+
+# Calls update-direnv-dependencies.yml by local path, so main's version runs rather than a
+# released tag. The default working-directory points it at this repository's own .envrc.
+#
+# A day after _update-pixi-dependencies.yml, so the two pull requests do not open together.
+#
+# A schedule fires from the default branch alone, so this does nothing until it is merged.
+# The secrets are the tomborglum-workflows-bot App _release-please.yml already uses.
+#
+# fixture-direnv-outdated is deliberately not covered: its pin must stay stale for
+# _test-update-direnv-dependencies.yml.
+
+on:
+  schedule:
+    - cron: '0 6 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    uses: ./.github/workflows/update-direnv-dependencies.yml
+    secrets:
+      app-client-id: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
+      app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}

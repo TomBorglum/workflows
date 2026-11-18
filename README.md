@@ -11,10 +11,92 @@ reusable *workflows* — whole jobs you call instead of writing.
 | Workflow | Purpose |
 | --- | --- |
 | [`docker-hub-publish.yml`](#docker-hub-publish) | Build, scan, sign and publish one container image per directory declared in a config file to Docker Hub, plus an OCI compose artifact per compose project, using GitHub OIDC and AWS to reach a Docker Hub credential. |
+| [`update-direnv-dependencies.yml`](#update-direnv-dependencies) | Rewrite the version pinned by [direnv](https://direnv.net)'s `use pixi` directive in an `.envrc` and open a pull request with what moved. |
 | [`update-pixi-dependencies.yml`](#update-pixi-dependencies) | Upgrade a [pixi](https://pixi.sh) workspace's dependencies and open a pull request with what moved — the updater Dependabot has no `pixi` ecosystem to provide. |
 
 Files prefixed with an underscore (`_release-please.yml`, `_sonarcloud.yml`) are this
 repository's own CI. They are not callable and never appear in the table above.
+
+### update-direnv-dependencies
+
+Rewrites the version pinned by [direnv](https://direnv.net)'s `use pixi` directive in an
+`.envrc` and opens a pull request with what moved. Dependabot has no direnv ecosystem, so
+a tool version pinned in an `.envrc` is bumped by nothing else.
+
+Wraps
+[`TomBorglum/actions/direnv/upgrade-pixi`](https://github.com/TomBorglum/actions/tree/main/direnv/upgrade-pixi).
+
+[`update-pixi-dependencies`](#update-pixi-dependencies) is the other half of the chore,
+rewriting `pixi.toml` and `pixi.lock`. The two share no file and run independently.
+
+```yaml
+name: Update direnv dependencies
+
+on:
+  schedule:
+    - cron: '0 6 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    uses: TomBorglum/workflows/.github/workflows/update-direnv-dependencies.yml@v2
+    secrets:
+      app-client-id: ${{ secrets.AUTOMATION_APP_CLIENT_ID }}
+      app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+```
+
+#### Requirements
+
+The `.envrc` declares exactly one `use pixi` directive, pinning a fully qualified
+`X.Y.Z`:
+
+```bash
+use pixi 0.81.0
+```
+
+None, two, or a partial pin fails the run; the action documents
+[each case](https://github.com/TomBorglum/actions/tree/main/direnv/upgrade-pixi#how-it-fails).
+
+No pixi is installed and the `.envrc` is never evaluated, so there is no `stub-directives`
+input and a drifted `pixi.lock` does not block the run. The version written into the pin
+is not verified against the workspace.
+
+A GitHub App installed on the repository with `Contents: read/write` and
+`Pull requests: read/write`, for the reason
+[`update-pixi-dependencies`](#update-pixi-dependencies) gives. The commit is signed as the
+App. `dry-run: true` needs neither secret.
+
+#### Inputs
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `working-directory` | `.` | Directory containing the `.envrc`. No parent is searched. |
+| `branch` | `deps/direnv` | Branch the pull request is opened from. |
+| `base` | *(checked-out branch)* | Branch the pull request targets. A caller triggered by `pull_request` or `release` is in detached HEAD and **must** set this. |
+| `dry-run` | `false` | Upgrade and report, but open no pull request. |
+
+#### Secrets
+
+| Secret | Description |
+| --- | --- |
+| `app-client-id` | The App's **Client ID** (App settings → General → Client ID), not the numeric App ID. Required unless `dry-run` is true. |
+| `app-private-key` | A private key for that same App. Required unless `dry-run` is true. |
+
+#### Outputs
+
+| Output | Description |
+| --- | --- |
+| `changed` | `'true'` when the `.envrc` was rewritten, `'false'` otherwise. |
+| `summary` | Markdown table of what moved (dependency, from, to). Empty when nothing changed. |
+| `pull-request-number` | Number of the pull request created or updated. Empty when nothing changed, or on a dry run. |
+| `pull-request-url` | URL of that pull request, empty under the same conditions. |
+
+The pull request contains exactly `.envrc` and is titled
+`deps: update direnv-pinned tool versions`, which cuts a patch release in a repository
+releasing from Conventional Commits.
 
 ### update-pixi-dependencies
 
@@ -27,6 +109,9 @@ it.
 It wraps
 [`TomBorglum/actions/pixi/upgrade-dependencies`](https://github.com/TomBorglum/actions/tree/main/pixi/upgrade-dependencies),
 which performs the upgrade and reports what moved but deliberately opens no pull request.
+
+The `use pixi` pin it solves against is itself bumped by
+[`update-direnv-dependencies`](#update-direnv-dependencies).
 
 ```yaml
 name: Update pixi dependencies
