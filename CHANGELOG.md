@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0](https://github.com/TomBorglum/workflows/compare/v2.0.1...v2.1.0) (2026-11-18)
+
+
+### Features
+
+* add update-direnv-dependencies workflow ([#34](https://github.com/TomBorglum/workflows/issues/34)) ([02f0222](https://github.com/TomBorglum/workflows/commit/02f0222e6e09851f21b90ad02dda1e15c9554c01))
+
+
+### Dependencies
+
+* Bump the actions group with 5 updates ([#32](https://github.com/TomBorglum/workflows/issues/32)) ([5d75f04](https://github.com/TomBorglum/workflows/commit/5d75f04ba6fc0f4359433adf292ff8d6295c7cd8))
+
 ## [2.0.1](https://github.com/TomBorglum/workflows/compare/v2.0.0...v2.0.1) (2026-11-13)
 
 
