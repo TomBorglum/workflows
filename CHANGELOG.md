@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/TomBorglum/workflows/compare/v2.1.0...v2.1.1) (2026-11-24)
+
+
+### Dependencies
+
+* Bump the actions group with 5 updates ([#35](https://github.com/TomBorglum/workflows/issues/35)) ([ea228db](https://github.com/TomBorglum/workflows/commit/ea228db06d463c4872679721552665b3a91e1f97))
+
 ## [2.1.0](https://github.com/TomBorglum/workflows/compare/v2.0.1...v2.1.0) (2026-11-18)
 
 
