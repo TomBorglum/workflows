@@ -30,7 +30,7 @@ jobs:
       # The same workspace docker-hub-publish.yml uses, so this tests the validator
       # consumers get.
       - name: Provide the config validator
-        uses: TomBorglum/actions/direnv/setup@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
+        uses: TomBorglum/actions/direnv/setup@0ab5ec0348d197ff309c3a1a4bac6cda1a88e374 # v3.3.0
 
       # An invalid schema accepts nothing, so every consumer's run breaks at once.
       - name: Check the schema against its metaschema

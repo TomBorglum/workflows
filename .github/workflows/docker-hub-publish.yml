@@ -105,7 +105,7 @@ jobs:
 
       # From the pixi workspace in the checkout above, never the runner image.
       - name: Provide the config validator
-        uses: TomBorglum/actions/direnv/setup@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
+        uses: TomBorglum/actions/direnv/setup@0ab5ec0348d197ff309c3a1a4bac6cda1a88e374 # v3.3.0
         with:
           working-directory: workflow-source
 
@@ -624,7 +624,7 @@ jobs:
       # exists, so its live window is only as long as the steps that need it.
       - name: Assume the release role
         id: creds
-        uses: TomBorglum/actions/aws/assume-role@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
+        uses: TomBorglum/actions/aws/assume-role@0ab5ec0348d197ff309c3a1a4bac6cda1a88e374 # v3.3.0
         with:
           # A secret, because the runner echoes this `with:` block into the log before the
           # action runs: an input would publish the account id on every release.

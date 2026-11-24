@@ -19,6 +19,6 @@ jobs:
         with:
           # Full history so SonarCloud can attribute issues to the right commits.
           fetch-depth: 0
-      - uses: TomBorglum/actions/sonar/scan@e28b4a48eb5d290f75bd764e076331ab58e7988e # v3.2.0
+      - uses: TomBorglum/actions/sonar/scan@0ab5ec0348d197ff309c3a1a4bac6cda1a88e374 # v3.3.0
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
